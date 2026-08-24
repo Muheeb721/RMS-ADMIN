@@ -1,0 +1,29 @@
+.bookings-page .table-wrap {
+  overflow: auto;
+}
+
+.bookings-page .table-wrap table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: min(760px, 100%);
+}
+
+.bookings-page .table-wrap th,
+.bookings-page .table-wrap td {
+  padding: 12px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.bookings-page .table-wrap th {
+  font-size: 0.78rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.bookings-page .inline-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}

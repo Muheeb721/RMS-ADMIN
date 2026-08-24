@@ -1,0 +1,50 @@
+.chatbot-page .property-form {
+  display: grid;
+  gap: 16px;
+}
+
+.chatbot-page .property-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.chatbot-page .toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-direction: row !important;
+}
+
+.chatbot-page .toggle-row input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary);
+}
+
+.chatbot-page .list-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.chatbot-page .list-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.chatbot-page .list-row:last-child {
+  border-bottom: none;
+}
+
+.chatbot-page .chatbot-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}

@@ -1,0 +1,36 @@
+.users-page .property-form {
+  display: grid;
+  gap: 16px;
+}
+
+.users-page .property-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.users-page .table-wrap {
+  overflow: auto;
+}
+
+.users-page .table-wrap table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: min(620px, 100%);
+}
+
+.users-page .table-wrap th,
+.users-page .table-wrap td {
+  padding: 12px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.users-page .table-wrap th {
+  color: var(--muted);
+  font-size: 0.78rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}

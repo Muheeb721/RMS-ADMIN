@@ -1,0 +1,35 @@
+.notifications-page .list-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.notifications-page .list-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.notifications-page .list-row:last-child {
+  border-bottom: none;
+}
+
+.notifications-page .list-row strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.notifications-page .list-row small {
+  color: var(--muted);
+}
+
+.notifications-page .time-tag {
+  font-size: 0.72rem;
+  color: var(--muted);
+  background: var(--surface-alt);
+  border-radius: 999px;
+  padding: 6px 8px;
+}
