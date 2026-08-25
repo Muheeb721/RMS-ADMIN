@@ -11,6 +11,7 @@ export const STORAGE_KEYS = {
 };
 
 export const AUTH_KEY = 'rms_admin_auth';
+export const LOGIN_CREDENTIALS_KEY = 'rms_admin_login_credentials';
 
 export const generateId = (prefix = 'id') => {
   const randomPart = Math.random().toString(36).slice(2, 8);
@@ -455,4 +456,25 @@ export const setAuthState = (value) => {
 export const clearAuthState = () => {
   if (typeof window === 'undefined') return;
   window.localStorage.removeItem(AUTH_KEY);
+};
+
+export const saveLoginCredentials = (email, password) => {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(LOGIN_CREDENTIALS_KEY, JSON.stringify({ email, password }));
+};
+
+export const clearLoginCredentials = () => {
+  if (typeof window === 'undefined') return;
+  window.localStorage.removeItem(LOGIN_CREDENTIALS_KEY);
+};
+
+export const clearAllAppStorage = () => {
+  if (typeof window === 'undefined') return;
+
+  Object.values(STORAGE_KEYS).forEach((storageKey) => {
+    window.localStorage.removeItem(storageKey);
+  });
+
+  window.localStorage.removeItem(AUTH_KEY);
+  window.localStorage.removeItem(LOGIN_CREDENTIALS_KEY);
 };

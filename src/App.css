@@ -35,25 +35,25 @@ button {
 }
 
 .primary-button {
-  background: linear-gradient(135deg, var(--primary), var(--secondary));
-  color: #111827;
+  background: linear-gradient(135deg, #0f172a, #1d4ed8);
+  color: #ffffff;
   padding: 12px 18px;
-  box-shadow: 0 14px 28px rgba(22, 163, 74, 0.22);
+  box-shadow: 0 14px 28px rgba(29, 78, 216, 0.22);
 }
 
 .outline-button {
-  background: rgba(22, 163, 74, 0.08);
-  color: #111827;
-  border: 1px solid rgba(22, 163, 74, 0.14);
+  background: rgba(15, 23, 42, 0.08);
+  color: #0f172a;
+  border: 1px solid rgba(15, 23, 42, 0.12);
   padding: 10px 14px;
 }
 
 .mini-button {
-  background: rgba(22, 163, 74, 0.08);
-  color: #111827;
+  background: linear-gradient(135deg, #0f172a, #1d4ed8);
+  color: #ffffff;
   padding: 8px 12px;
   font-size: 0.82rem;
-  border: 1px solid rgba(22, 163, 74, 0.12);
+  border: 1px solid rgba(29, 78, 216, 0.18);
 }
 
 .table-button {
@@ -63,13 +63,15 @@ button {
 }
 
 .table-button.light {
-  background: rgba(22, 163, 74, 0.08);
-  color: #111827;
+  background: linear-gradient(135deg, #1d4ed8, #1e3a8a);
+  color: #ffffff;
+  border-color: rgba(30, 58, 138, 0.2);
 }
 
 .table-button.danger {
-  background: rgba(220, 38, 38, 0.08);
-  color: var(--danger);
+  background: linear-gradient(135deg, #b91c1c, #7f1d1d);
+  color: #ffffff;
+  border-color: rgba(127, 29, 29, 0.2);
 }
 
 .full-width {
@@ -253,7 +255,7 @@ textarea:focus {
   display: grid;
   place-items: center;
   background: linear-gradient(135deg, var(--primary), var(--secondary));
-  color: white;
+  color: rgb(26, 22, 22);
   font-weight: 700;
 }
 

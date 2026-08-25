@@ -4,7 +4,7 @@ import './App.css';
 import Toast from './components/Toast';
 import AdminLayout from './components/AdminLayout';
 import LoginPage from './pages/LoginPage';
-import { clearAuthState, loadAppData, loadAuthState, persistAppData, setAuthState } from './services/localStorage';
+import { clearAllAppStorage, clearAuthState, loadAppData, loadAuthState, persistAppData, saveLoginCredentials, setAuthState } from './services/localStorage';
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(loadAuthState);
@@ -27,6 +27,26 @@ function App() {
 
   const handleLogin = (email, password) => {
     if (email && password && email.includes('@') && password.length >= 4) {
+      const loginNotification = {
+        id: `notif-${Date.now()}`,
+        title: 'User logged in',
+        message: `${email} signed in to the admin portal.`,
+        detail: `Login by ${email}. Role: Administrator.`,
+        type: 'Login',
+        recipient: email,
+        date: new Date().toISOString(),
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        read: false,
+        priority: 'Normal',
+      };
+
+      saveLoginCredentials(email, password);
+
+      setAppData((prev) => ({
+        ...prev,
+        notifications: [loginNotification, ...(prev.notifications || [])],
+      }));
+
       setIsAuthenticated(true);
       setToast({ message: 'Welcome back, Admin 👋', variant: 'success' });
       return true;
@@ -35,6 +55,7 @@ function App() {
   };
 
   const handleLogout = () => {
+    clearAllAppStorage();
     clearAuthState();
     setIsAuthenticated(false);
     setToast({ message: 'Logged out successfully.', variant: 'info' });
@@ -43,7 +64,7 @@ function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/login" element={<LoginPage onLogin={handleLogin} />} />
+        <Route path="/login" element={isAuthenticated ? <Navigate to="/admin" replace /> : <LoginPage onLogin={handleLogin} />} />
         <Route path="/" element={<Navigate to={isAuthenticated ? '/admin' : '/login'} replace />} />
         <Route
           path="/admin/*"
