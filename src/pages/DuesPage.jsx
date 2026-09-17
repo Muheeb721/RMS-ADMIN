@@ -1,48 +1,181 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
+import { createAdminPayment } from '../services/adminPaymentService';
+import { apiService } from '../services/api';
 import './DuesPage.css';
 import { formatCurrency, formatDate } from '../utils/formatters';
 
 function DuesPage({ appData, setAppData, notify }) {
   const dues = appData.dues || [];
+  const [loadingDues, setLoadingDues] = useState(false);
+  const [processingDueId, setProcessingDueId] = useState(null);
+  const [sendingReminders, setSendingReminders] = useState(false);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
 
+  const normalizeDueStatus = (due) => {
+    const raw = String(due?.status || due?.paymentStatus || due?.state || 'Due');
+    const value = raw.trim().toLowerCase();
+
+    if (['paid', 'completed', 'settled', 'success'].includes(value)) return 'Paid';
+    if (['overdue', 'late', 'delinquent'].includes(value)) return 'Overdue';
+    if (['pending', 'in review', 'review', 'waiting'].includes(value)) return 'Pending';
+    if (['due', 'open', 'outstanding'].includes(value)) return 'Due';
+
+    return raw || 'Due';
+  };
+
+  const getDueAmount = (due) => Number(due?.remainingAmount ?? due?.amount ?? due?.totalAmount ?? 0);
+  const getDueUser = (due) => due?.user || due?.residentName || due?.tenantName || 'N/A';
+  const getDueProperty = (due) => due?.property || due?.propertyName || due?.unit || 'N/A';
+  const getDueId = (due) => due?.id || due?._id || due?.dueId || due?.reference || 'N/A';
+
+  const summary = useMemo(() => {
+    const outstanding = dues.filter((item) => ['Due', 'Pending', 'Overdue'].includes(normalizeDueStatus(item))).reduce((sum, item) => sum + getDueAmount(item), 0);
+    const paid = dues.filter((item) => normalizeDueStatus(item) === 'Paid').reduce((sum, item) => sum + getDueAmount(item), 0);
+    const overdue = dues.filter((item) => normalizeDueStatus(item) === 'Overdue').length;
+    const pending = dues.filter((item) => normalizeDueStatus(item) === 'Pending').length;
+
+    return { outstanding, paid, overdue, pending };
+  }, [dues]);
+
   const filteredDues = useMemo(() => {
     const next = [...dues].filter((due) => {
-      const matchesSearch = !search || [due.user, due.property, due.id].join(' ').toLowerCase().includes(search.toLowerCase());
-      const matchesStatus = statusFilter === 'All' || due.status === statusFilter;
+      const normalizedStatus = normalizeDueStatus(due);
+      const matchesSearch =
+        !search ||
+        [getDueUser(due), getDueProperty(due), getDueId(due)]
+          .join(' ')
+          .toLowerCase()
+          .includes(search.toLowerCase());
+      const matchesStatus = statusFilter === 'All' || normalizedStatus === statusFilter;
       return matchesSearch && matchesStatus;
     });
     return next.sort((a, b) => new Date(a.dueDate || 0) - new Date(b.dueDate || 0));
   }, [dues, search, statusFilter]);
 
   const markPaid = (dueId) => {
-    setAppData((prev) => ({
-      ...prev,
-      dues: (prev.dues || []).map((item) => (item.id === dueId ? { ...item, status: 'Paid', paymentStatus: 'Paid' } : item)),
-    }));
-    notify({ message: 'Due marked as paid.', variant: 'success' });
+    (async () => {
+      try {
+        setProcessingDueId(dueId);
+        notify && notify({ message: 'Recording payment...', variant: 'info' });
+        const due = (appData.dues || []).find((d) => String(getDueId(d)) === String(dueId));
+        const payload = {
+          user: due?.user || '',
+          userName: due?.residentName || due?.user || '',
+          property: getDueProperty(due),
+          propertyName: getDueProperty(due),
+          amount: getDueAmount(due),
+          totalAmount: Number(due?.amount || 0),
+          amountPaid: getDueAmount(due),
+          paymentDate: new Date().toISOString(),
+          status: 'Paid',
+          method: 'Admin Adjustment',
+          notes: 'Marked paid by admin from dues panel',
+        };
+
+        const created = await createAdminPayment(payload);
+        if (created) {
+          setAppData((prev) => ({
+            ...prev,
+            dues: (prev.dues || []).map((item) => (String(getDueId(item)) === String(dueId) ? { ...item, status: 'Paid', paymentStatus: 'Paid', updatedAt: new Date().toISOString() } : item)),
+            payments: [created, ...(prev.payments || [])],
+          }));
+          notify && notify({ message: 'Due marked as paid.', variant: 'success' });
+        } else {
+          notify && notify({ message: 'Payment recorded but no response from server.', variant: 'warning' });
+        }
+      } catch (e) {
+        console.error('Mark paid failed', e);
+        notify && notify({ message: e?.message || 'Unable to mark due as paid.', variant: 'error' });
+      } finally {
+        setProcessingDueId(null);
+      }
+    })();
   };
 
   const sendReminder = (due) => {
-    setAppData((prev) => ({
-      ...prev,
-      notifications: [
-        {
-          id: `notif-${Date.now()}`,
-          title: 'Rent reminder sent',
-          detail: `Reminder sent for ${due.user} for ${due.property}.`,
-          time: 'Just now',
-          read: false,
-        },
-        ...(prev.notifications || []),
-      ],
-    }));
-    notify({ message: `Reminder sent to ${due.user}.`, variant: 'info' });
+    (async () => {
+      try {
+        setSendingReminders(true);
+        notify && notify({ message: `Sending reminder to ${getDueUser(due)}...`, variant: 'info' });
+        const payload = {
+          userId: due?.userId || due?.user || '',
+          userName: getDueUser(due),
+          entityType: 'RENT',
+          entityId: getDueId(due),
+          title: 'Rent reminder',
+          message: `Reminder: rent due for ${getDueProperty(due)}. Please pay ${formatCurrency(getDueAmount(due))}.`,
+          detail: `Reminder sent for ${getDueUser(due)} for ${getDueProperty(due)}.`,
+          actorType: 'system',
+          actorName: 'System',
+          actionType: 'REMINDER',
+          status: 'Notice',
+          date: new Date().toISOString(),
+        };
+        const resp = await apiService.request('/notifications/create', { method: 'POST', body: payload });
+        if (resp?.success && resp.data) {
+          setAppData((prev) => ({ ...prev, notifications: [resp.data, ...(prev.notifications || [])] }));
+          notify && notify({ message: `Reminder sent to ${getDueUser(due)}.`, variant: 'info' });
+        } else {
+          setAppData((prev) => ({
+            ...prev,
+            notifications: [
+              { id: `notif-${Date.now()}`, title: 'Rent reminder sent', detail: `Reminder sent for ${getDueUser(due)} for ${getDueProperty(due)}.`, time: 'Just now', read: false },
+              ...(prev.notifications || []),
+            ],
+          }));
+          notify && notify({ message: `Reminder queued for ${getDueUser(due)}.`, variant: 'info' });
+        }
+      } catch (e) {
+        console.error('Send reminder failed', e);
+        notify && notify({ message: e?.message || `Unable to send reminder to ${getDueUser(due)}.`, variant: 'error' });
+      } finally {
+        setSendingReminders(false);
+      }
+    })();
   };
+
+  useEffect(() => {
+    const loadDues = async () => {
+      setLoadingDues(true);
+      try {
+        const res = await apiService.request('/dues');
+        if (res?.success) {
+          const items = Array.isArray(res.data) ? res.data : [];
+          setAppData((prev) => ({ ...prev, dues: items }));
+        }
+      } catch (err) {
+        console.error('Failed to load dues:', err);
+        notify && notify({ message: err?.message || 'Unable to load dues.', variant: 'error' });
+      } finally {
+        setLoadingDues(false);
+      }
+    };
+
+    loadDues();
+  }, [setAppData, notify]);
 
   return (
     <div className="page-section dues-page">
+      <div className="summary-strip dues-strip">
+        <div className="summary-item primary">
+          <span>Outstanding</span>
+          <strong>{formatCurrency(summary.outstanding)}</strong>
+        </div>
+        <div className="summary-item success">
+          <span>Paid</span>
+          <strong>{formatCurrency(summary.paid)}</strong>
+        </div>
+        <div className="summary-item danger">
+          <span>Overdue</span>
+          <strong>{summary.overdue}</strong>
+        </div>
+        <div className="summary-item info">
+          <span>Pending</span>
+          <strong>{summary.pending}</strong>
+        </div>
+      </div>
+
       <section className="panel-card toolbar-card">
         <div className="toolbar-row">
           <div className="toolbar-search">
@@ -52,6 +185,7 @@ function DuesPage({ appData, setAppData, notify }) {
             <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
               <option value="All">All Status</option>
               <option value="Due">Due</option>
+              <option value="Pending">Pending</option>
               <option value="Paid">Paid</option>
               <option value="Overdue">Overdue</option>
             </select>
@@ -79,24 +213,31 @@ function DuesPage({ appData, setAppData, notify }) {
               </tr>
             </thead>
             <tbody>
-              {filteredDues.map((due) => (
-                <tr key={due.id}>
-                  <td>{due.id}</td>
-                  <td>{due.user}</td>
-                  <td>{due.property}</td>
-                  <td>{formatCurrency(due.amount)}</td>
-                  <td>{formatDate(due.dueDate)}</td>
-                  <td><span className={`status-badge ${String(due.status).toLowerCase()}`}>{due.status}</span></td>
-                  <td>
-                    <div className="table-actions">
-                      <button type="button" className="table-button light" onClick={() => markPaid(due.id)} disabled={due.status === 'Paid'}>
-                        {due.status === 'Paid' ? 'Paid' : 'Mark Paid'}
-                      </button>
-                      <button type="button" className="table-button light" onClick={() => sendReminder(due)}>Remind</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {filteredDues.map((due) => {
+                const status = normalizeDueStatus(due);
+                const rowId = getDueId(due);
+                const amount = getDueAmount(due);
+                return (
+                  <tr key={rowId}>
+                    <td>{rowId}</td>
+                    <td>{getDueUser(due)}</td>
+                    <td>{getDueProperty(due)}</td>
+                    <td>{formatCurrency(amount)}</td>
+                    <td>{formatDate(due.dueDate)}</td>
+                    <td>
+                      <span className={`status-badge ${String(status).toLowerCase()}`}>{status}</span>
+                    </td>
+                    <td>
+                      <div className="table-actions">
+                        <button type="button" className="table-button light" onClick={() => markPaid(rowId)} disabled={status === 'Paid'}>
+                          {status === 'Paid' ? 'Paid' : 'Mark Paid'}
+                        </button>
+                        <button type="button" className="table-button light" onClick={() => sendReminder(due)}>Remind</button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

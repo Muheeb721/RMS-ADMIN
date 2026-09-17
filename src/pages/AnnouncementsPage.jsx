@@ -1,7 +1,58 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { apiService } from '../services/api';
 import './AnnouncementsPage.css';
 
-function AnnouncementsPage({ appState, setAppState }) {
+function AnnouncementsPage({ appState, setAppState, notify }) {
+  const notificationFeed = appState?.notifications || [];
+
+  const announcements = useMemo(() => {
+    const directAnnouncements = (appState?.announcements || []).map((item) => ({
+      id: item.id || item._id || `announcement-${Date.now()}-${Math.random()}`,
+      title: item.title || 'Announcement',
+      audience: item.audience || 'All occupants',
+      priority: item.priority || item.status || 'Medium',
+      content: item.content || item.message || '',
+      createdAt: item.createdAt || new Date().toISOString(),
+      createdCount: item.createdCount || 1,
+    }));
+
+    const liveAnnouncements = notificationFeed
+      .filter((item) => item?.actionType === 'ANNOUNCEMENT' || item?.entityType === 'GENERAL' || /announcement/i.test(item?.title || item?.message || ''))
+      .map((item) => ({
+        id: item.id || item._id || `live-announcement-${Date.now()}-${Math.random()}`,
+        title: item.title || 'Announcement',
+        audience: item.audience || 'All occupants',
+        priority: item.priority || item.status || 'Medium',
+        content: item.message || item.content || '',
+        createdAt: item.createdAt || item.date || new Date().toISOString(),
+        createdCount: item.createdCount || 1,
+      }));
+
+    return [...directAnnouncements, ...liveAnnouncements]
+      .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+      .slice(0, 10);
+  }, [appState?.announcements, notificationFeed]);
+
+  const summary = useMemo(() => {
+    const counts = announcements.reduce((acc, item) => {
+      acc.total += 1;
+      acc.recipients += Number(item.createdCount || 0);
+      if (String(item.priority || '').toLowerCase() === 'high') acc.highPriority += 1;
+      if (String(item.audience || '').toLowerCase().includes('tenant')) acc.tenants += 1;
+      if (String(item.audience || '').toLowerCase().includes('landlord')) acc.landlords += 1;
+      return acc;
+    }, { total: 0, recipients: 0, highPriority: 0, tenants: 0, landlords: 0 });
+
+    return {
+      total: counts.total,
+      recipients: counts.recipients,
+      highPriority: counts.highPriority,
+      audiences: new Set(announcements.map((item) => item.audience || 'All occupants')).size,
+      tenants: counts.tenants,
+      landlords: counts.landlords,
+    };
+  }, [announcements]);
+
   const [form, setForm] = useState({
     title: '',
     audience: 'All occupants',
@@ -9,24 +60,128 @@ function AnnouncementsPage({ appState, setAppState }) {
     content: '',
   });
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
-    if (!form.title || !form.content) return;
+    if (!form.title.trim() || !form.content.trim()) {
+      notify?.({ message: 'Please add a title and announcement text.', variant: 'error' });
+      return;
+    }
 
-    setAppState((prev) => ({
-      ...prev,
-      announcements: [{ id: Date.now(), ...form }, ...prev.announcements],
-    }));
-    setForm({ title: '', audience: 'All occupants', priority: 'Medium', content: '' });
+    try {
+      const payloadBase = {
+        actorType: 'admin',
+        actorName: appState?.profile?.fullName || appState?.admin?.name || appState?.admin?.fullName || 'Admin',
+        actionType: 'ANNOUNCEMENT',
+        entityType: 'GENERAL',
+        title: form.title.trim(),
+        message: form.content.trim(),
+        status: form.priority || 'Medium',
+        audience: form.audience,
+      };
+
+      let recipients = [];
+      const usersResponse = await apiService.request('/admin/users');
+      const allUsers = usersResponse?.data || [];
+
+      if (form.audience === 'All occupants') {
+        recipients = allUsers;
+      } else if (form.audience === 'Tenants') {
+        recipients = allUsers.filter((user) => ['tenant', 'resident'].includes(String(user.role || '').toLowerCase()));
+      } else if (form.audience === 'Landlords') {
+        recipients = allUsers.filter((user) => ['landlord', 'owner'].includes(String(user.role || '').toLowerCase()));
+      }
+
+      const created = [];
+      for (const user of recipients) {
+        const userId = user?._id || user?.id;
+        if (!userId) continue;
+        try {
+          const note = await apiService.request('/notifications/create', {
+            method: 'POST',
+            body: {
+              ...payloadBase,
+              userId,
+              userName: user.name || user.email || 'User',
+            },
+          });
+          if (note?.data) created.push(note.data);
+        } catch (err) {
+          console.warn('Failed to create announcement notification', userId, err);
+        }
+      }
+
+      const announcement = {
+        id: Date.now(),
+        title: form.title.trim(),
+        audience: form.audience,
+        priority: form.priority || 'Medium',
+        content: form.content.trim(),
+        createdCount: created.length || recipients.length || 0,
+        createdAt: new Date().toISOString(),
+      };
+
+      setAppState((prev) => ({
+        ...prev,
+        announcements: [announcement, ...(prev.announcements || [])],
+        notifications: [
+          ...created.map((item) => ({
+            ...item,
+            title: announcement.title,
+            message: announcement.content,
+            audience: announcement.audience,
+            status: announcement.priority,
+            priority: announcement.priority,
+            actionType: 'ANNOUNCEMENT',
+            entityType: 'GENERAL',
+          })),
+          ...(prev.notifications || []),
+        ].slice(0, 30),
+      }));
+
+      notify?.({ message: `Announcement sent to ${created.length || recipients.length || 0} recipient(s).`, variant: 'success' });
+      setForm({ title: '', audience: 'All occupants', priority: 'Medium', content: '' });
+    } catch (error) {
+      console.error('Announcement publish failed', error);
+      setAppState((prev) => ({
+        ...prev,
+        announcements: [{ id: Date.now(), ...form, content: form.content.trim(), createdCount: 0, createdAt: new Date().toISOString() }, ...(prev.announcements || [])],
+      }));
+      notify?.({ message: error?.message || 'Unable to publish announcement.', variant: 'error' });
+      setForm({ title: '', audience: 'All occupants', priority: 'Medium', content: '' });
+    }
   };
 
   return (
     <div className="page-section announcements-page">
+      <div className="summary-strip">
+        <div className="summary-item primary">
+          <span>Total broadcasts</span>
+          <strong>{summary.total}</strong>
+        </div>
+        <div className="summary-item success">
+          <span>Recipients reached</span>
+          <strong>{summary.recipients}</strong>
+        </div>
+        <div className="summary-item danger">
+          <span>High priority</span>
+          <strong>{summary.highPriority}</strong>
+        </div>
+        <div className="summary-item info">
+          <span>Audience groups</span>
+          <strong>{summary.audiences}</strong>
+        </div>
+      </div>
+
       <div className="content-grid two-column">
-        <section className="panel-card">
+        <section className="panel-card announcement-composer">
           <div className="card-header">
-            <h3>Create Announcement</h3>
+            <div>
+              <p className="eyebrow">Communication</p>
+              <h3>Create announcement</h3>
+            </div>
+            <span className="mini-badge">Live send</span>
           </div>
+
           <form onSubmit={handleSubmit} className="property-form">
             <label>
               Title
@@ -52,23 +207,33 @@ function AnnouncementsPage({ appState, setAppState }) {
               Content
               <textarea value={form.content} rows="5" onChange={(e) => setForm((prev) => ({ ...prev, content: e.target.value }))} />
             </label>
-            <button type="submit" className="primary-button">Publish</button>
+            <button type="submit" className="primary-button">Publish announcement</button>
           </form>
         </section>
 
-        <section className="panel-card">
+        <section className="panel-card announcement-feed">
           <div className="card-header">
-            <h3>Published Announcements</h3>
+            <div>
+              <p className="eyebrow">Broadcasts</p>
+              <h3>Recent announcements</h3>
+            </div>
+            <span className="mini-badge">{announcements.length} active</span>
           </div>
+
           <div className="list-stack large">
-            {appState.announcements.map((item) => (
-              <div key={item.id} className="list-row announcement-row">
-                <div>
-                  <strong>{item.title}</strong>
-                  <small>{item.audience} · {item.priority}</small>
-                  <p>{item.content}</p>
+            {announcements.length === 0 ? (
+              <div className="empty-state">No announcements yet.</div>
+            ) : announcements.map((item) => (
+              <article key={item.id} className="list-row announcement-row">
+                <div className="announcement-copy">
+                  <div className="announcement-meta">
+                    <strong>{item.title}</strong>
+                    <span className={`status-badge ${String(item.priority || 'medium').toLowerCase()}`}>{item.priority || 'Medium'}</span>
+                  </div>
+                  <small>{item.audience || 'All occupants'} · {new Date(item.createdAt).toLocaleString()}</small>
+                  <p>{item.content || item.message || 'Announcement details not available.'}</p>
                 </div>
-              </div>
+              </article>
             ))}
           </div>
         </section>

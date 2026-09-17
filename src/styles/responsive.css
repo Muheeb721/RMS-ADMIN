@@ -2,6 +2,19 @@
 
 html,
 body {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+#root {
+  width: 100%;
+  max-width: 100%;
   overflow-x: hidden;
 }
 
@@ -73,6 +86,14 @@ body {
 }
 
 @media (max-width: 600px) {
+  body,
+  html,
+  #root {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
   /* Make list rows stack vertically */
   .list-row {
     flex-direction: column;
@@ -102,6 +123,23 @@ body {
 
   .profile-pill {
     display: none !important;
+  }
+
+  .dashboard-shell,
+  .content-area,
+  .page-section,
+  .panel-card,
+  .stat-card,
+  .card,
+  .content-grid,
+  .stats-grid,
+  .table-wrap,
+  .section-header,
+  .toolbar,
+  .modal-card {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
   }
 
   /* Make buttons more compact but readable */

@@ -1,8 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import './HousesPage.css';
 import Modal from '../components/Modal';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import { generateId } from '../services/localStorage';
+import { apiService } from '../services/api';
+import { createAdminProperty, deleteAdminProperty, updateAdminProperty } from '../services/adminPropertyService';
 
 const emptyForm = {
   title: '',
@@ -31,9 +33,54 @@ const emptyForm = {
 };
 
 const statusOptions = ['Available', 'Reserved', 'Sold', 'For Rent'];
+const HOUSE_DEFAULT_IMAGES = [
+  'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=900&q=80',
+  'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=900&q=80',
+  'https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=900&q=80',
+  'https://images.unsplash.com/photo-1512917774080-9991f1c4c750?auto=format&fit=crop&w=900&q=80',
+  'https://images.unsplash.com/photo-1613490493576-7fde63acd811?auto=format&fit=crop&w=900&q=80',
+  'https://images.unsplash.com/photo-1600565193348-f74bd3c7ccdf?auto=format&fit=crop&w=900&q=80',
+  'https://images.unsplash.com/photo-1580587771525-78b9dba3b914?auto=format&fit=crop&w=900&q=80',
+  'https://images.unsplash.com/photo-1600585154526-990dced4db0d?auto=format&fit=crop&w=900&q=80',
+  'https://images.unsplash.com/photo-1600573472592-401b489a3cdc?auto=format&fit=crop&w=900&q=80',
+  'https://images.unsplash.com/photo-1523217582562-09d0def993a6?auto=format&fit=crop&w=900&q=80',
+];
+const HOUSE_DEFAULT_IMAGE = HOUSE_DEFAULT_IMAGES[0];
+const BACKEND_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/api\/?$/, '');
+const normalizeImageUrl = (value) => {
+  if (!value || typeof value !== 'string') return HOUSE_DEFAULT_IMAGE;
+  const trimmed = value.trim();
+  if (!trimmed) return HOUSE_DEFAULT_IMAGE;
+  if (trimmed.startsWith('data:') || trimmed.startsWith('blob:') || /^(https?:)?\/\//i.test(trimmed)) return trimmed;
+  if (trimmed.startsWith('/')) return `${BACKEND_BASE_URL}${trimmed}`;
+  return trimmed;
+};
+const getPropertyImageUrl = (property, index = 0) => {
+  const candidateValues = [];
+  const rawImages = Array.isArray(property?.images) ? property.images : [];
+  rawImages.forEach((item) => item && candidateValues.push(item));
+  if (property?.image) candidateValues.push(property.image);
+  if (property?.mainImage) candidateValues.push(property.mainImage);
+  if (property?.coverImage) candidateValues.push(property.coverImage);
+  const deduped = [...new Set(candidateValues.map((item) => normalizeImageUrl(item)).filter(Boolean))];
+  const fallback = HOUSE_DEFAULT_IMAGES[(Number(index) || 0) % HOUSE_DEFAULT_IMAGES.length] || HOUSE_DEFAULT_IMAGE;
+  return deduped[0] || deduped[index] || fallback;
+};
+const getPropertyId = (property) => property?._id || property?.id || property?.propertyId || property?.mongoId;
 
 function HousesPage({ appData, setAppData, notify }) {
   const properties = (appData.properties || []).filter((item) => item.propertyType === 'House' || item.category === 'House');
+
+  const refreshProperties = async () => {
+    try {
+      const resp = await apiService.request('/admin/properties');
+      if (resp?.success) {
+        setAppData((prev) => ({ ...prev, properties: resp.data || prev.properties || [] }));
+      }
+    } catch (error) {
+      console.warn('Unable to refresh property list from backend:', error);
+    }
+  };
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
   const [sortKey, setSortKey] = useState('createdAt');
@@ -68,8 +115,23 @@ function HousesPage({ appData, setAppData, notify }) {
     setModalOpen(true);
   };
 
+  useEffect(() => {
+    const loadProperties = async () => {
+      try {
+        const existing = (appData.properties || []).length;
+        if (existing) return;
+        const resp = await apiService.request('/admin/properties');
+        if (resp?.success) setAppData((prev) => ({ ...prev, properties: resp.data || [] }));
+      } catch (e) {
+        console.warn('Load properties failed', e);
+        notify && notify({ message: 'Unable to load properties', variant: 'error' });
+      }
+    };
+    loadProperties();
+  }, [setAppData]);
+
   const openEditModal = (property) => {
-    setEditingId(property.id);
+    setEditingId(getPropertyId(property));
     setFormData({
       title: property.title || '',
       propertyType: property.propertyType || 'House',
@@ -134,7 +196,7 @@ function HousesPage({ appData, setAppData, notify }) {
     }));
   };
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
     const nextErrors = validate();
     if (Object.keys(nextErrors).length) {
@@ -142,7 +204,7 @@ function HousesPage({ appData, setAppData, notify }) {
       return;
     }
 
-    const previousProperty = editingId ? properties.find((item) => item.id === editingId) : null;
+    const previousProperty = editingId ? properties.find((item) => String(getPropertyId(item)) === String(editingId)) : null;
     const nextPriceHistory = previousProperty?.priceHistory || [];
 
     if (editingId && previousProperty) {
@@ -151,7 +213,7 @@ function HousesPage({ appData, setAppData, notify }) {
       if (prevPrice !== nextPrice) {
         nextPriceHistory.unshift({
           historyId: `hist-${Date.now()}`,
-          propertyId: previousProperty.id,
+          propertyId: getPropertyId(previousProperty),
           oldPrice: prevPrice,
           newPrice: nextPrice,
           changedBy: 'Admin',
@@ -161,7 +223,6 @@ function HousesPage({ appData, setAppData, notify }) {
     }
 
     const payload = {
-      id: editingId || generateId('prop'),
       title: formData.title.trim(),
       propertyType: 'House',
       category: 'House',
@@ -183,106 +244,135 @@ function HousesPage({ appData, setAppData, notify }) {
       ownerName: formData.ownerName.trim(),
       ownerPhone: formData.ownerPhone.trim(),
       ownerEmail: formData.ownerEmail.trim(),
-      image: formData.image || 'https://images.unsplash.com/photo-1568605114967-8130f3a36994?auto=format&fit=crop&w=900&q=80',
-      images: formData.images || [formData.image || 'https://images.unsplash.com/photo-1568605114967-8130f3a36994?auto=format&fit=crop&w=900&q=80'],
+      image: formData.image || HOUSE_DEFAULT_IMAGE,
+      images: Array.isArray(formData.images) && formData.images.length ? formData.images : [formData.image || HOUSE_DEFAULT_IMAGE],
       status: formData.status,
       createdAt: editingId ? previousProperty?.createdAt || new Date().toISOString() : new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       priceHistory: nextPriceHistory,
     };
 
-    setAppData((prev) => {
-      const list = editingId
-        ? prev.properties.map((item) => (item.id === editingId ? payload : item))
-        : [payload, ...(prev.properties || [])];
-      return { ...prev, properties: list };
-    });
+    try {
+      const saved = editingId
+        ? await updateAdminProperty(editingId, payload)
+        : await createAdminProperty(payload);
+      const finalProperty = saved || payload;
 
-    setAppData((prev) => ({
-      ...prev,
-      notifications: [
-        {
-          id: `notif-${Date.now()}`,
-          title: editingId ? 'House updated' : 'New house added',
-          message: `${payload.title} was ${editingId ? 'updated' : 'added'} successfully.`,
-          propertyId: payload.id,
-          propertyType: 'House',
-          time: 'Just now',
-          date: new Date().toISOString(),
-          read: false,
-          priority: 'Normal',
-        },
-        ...(prev.notifications || []),
-      ],
-    }));
+      await refreshProperties();
 
-    addActivity(editingId ? 'House edited' : 'House added', `${payload.title} was ${editingId ? 'updated' : 'added'} to the house catalog.`);
-    notify({ message: editingId ? 'House updated successfully.' : 'House added successfully.', variant: 'success' });
-    setModalOpen(false);
-    setEditingId(null);
-    setFormData(emptyForm);
+      setAppData((prev) => ({
+        ...prev,
+        notifications: [
+          {
+            id: `notif-${Date.now()}`,
+            title: editingId ? 'House updated' : 'New house added',
+            message: `${finalProperty.title || payload.title} was ${editingId ? 'updated' : 'added'} successfully.`,
+            propertyId: getPropertyId(finalProperty) || editingId,
+            propertyType: 'House',
+            time: 'Just now',
+            date: new Date().toISOString(),
+            read: false,
+            priority: 'Normal',
+          },
+          ...(prev.notifications || []),
+        ],
+      }));
+
+      addActivity(editingId ? 'House edited' : 'House added', `${finalProperty.title || payload.title} was ${editingId ? 'updated' : 'added'} to the house catalog.`);
+      notify({ message: editingId ? 'House updated successfully.' : 'House added successfully.', variant: 'success' });
+      setModalOpen(false);
+      setEditingId(null);
+      setFormData(emptyForm);
+    } catch (error) {
+      console.error('House save failed:', error);
+      notify({ message: error.message || 'Unable to save house.', variant: 'error' });
+    }
   };
 
-  const handleDelete = (propertyId) => {
-    setAppData((prev) => ({ ...prev, properties: (prev.properties || []).filter((item) => item.id !== propertyId) }));
-    addActivity('House deleted', 'A house was removed from the catalog.');
-    notify({ message: 'House deleted successfully.', variant: 'success' });
+  const handleDelete = async (propertyId) => {
+    try {
+      await deleteAdminProperty(propertyId);
+      await refreshProperties();
+      addActivity('House deleted', 'A house was removed from the catalog.');
+      notify({ message: 'House deleted successfully.', variant: 'success' });
+    } catch (error) {
+      console.error('House delete failed:', error);
+      notify({ message: error.message || 'Unable to delete house.', variant: 'error' });
+    }
     setDeletingId(null);
   };
 
   const changeStatus = (propertyId, nextStatus) => {
-    setAppData((prev) => ({
-      ...prev,
-      properties: (prev.properties || []).map((item) => (item.id === propertyId ? { ...item, status: nextStatus, updatedAt: new Date().toISOString() } : item)),
-    }));
-    addActivity('House status changed', `A house status was updated to ${nextStatus}.`);
-    notify({ message: `House status updated to ${nextStatus}.`, variant: 'success' });
+    (async () => {
+      try {
+        notify && notify({ message: 'Updating house status...', variant: 'info' });
+        const resp = await apiService.request(`/properties/${propertyId}/status`, { method: 'POST', body: { status: nextStatus } });
+        const updated = resp?.data || null;
+        if (updated) {
+          setAppData((prev) => ({ ...prev, properties: (prev.properties || []).map((item) => (String(getPropertyId(item)) === String(propertyId) ? { ...item, ...updated } : item)) }));
+        } else {
+          setAppData((prev) => ({ ...prev, properties: (prev.properties || []).map((item) => (String(getPropertyId(item)) === String(propertyId) ? { ...item, status: nextStatus, updatedAt: new Date().toISOString() } : item)) }));
+        }
+        await refreshProperties();
+        addActivity('House status changed', `A house status was updated to ${nextStatus}.`);
+        notify && notify({ message: `House status updated to ${nextStatus}.`, variant: 'success' });
+      } catch (e) {
+        console.error('Update status failed', e);
+        notify && notify({ message: e?.message || 'Unable to update house status.', variant: 'error' });
+      }
+    })();
   };
 
   const duplicateProperty = (property) => {
-    const duplicate = {
-      ...property,
-      id: generateId('prop'),
-      title: `${property.title} Copy`,
-      propertyType: 'House',
-      category: 'House',
-      status: property.status || 'Available',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      priceHistory: property.priceHistory || [],
-    };
-
-    setAppData((prev) => ({ ...prev, properties: [duplicate, ...(prev.properties || [])] }));
-    setEditingId(duplicate.id);
-    setFormData({
-      title: duplicate.title || '',
-      propertyType: 'House',
-      category: 'House',
-      description: duplicate.description || '',
-      price: duplicate.price || '',
-      rent: duplicate.rent || '',
-      salePrice: duplicate.salePrice || '',
-      deposit: duplicate.deposit || '',
-      otherCharges: duplicate.otherCharges || '',
-      location: duplicate.location || '',
-      city: duplicate.city || '',
-      address: duplicate.address || '',
-      bedrooms: duplicate.bedrooms || '',
-      bathrooms: duplicate.bathrooms || '',
-      area: duplicate.area || '',
-      furnished: duplicate.furnished || 'Fully Furnished',
-      floor: duplicate.floor || '',
-      totalFloors: duplicate.totalFloors || '',
-      ownerName: duplicate.ownerName || '',
-      ownerPhone: duplicate.ownerPhone || '',
-      ownerEmail: duplicate.ownerEmail || '',
-      image: duplicate.image || '',
-      status: duplicate.status || 'Available',
-    });
-    setErrors({});
-    setModalOpen(true);
-    addActivity('House duplicated', `${property.title} was duplicated and opened for editing.`);
-    notify({ message: 'House duplicated and opened for editing.', variant: 'success' });
+    (async () => {
+      try {
+        notify && notify({ message: 'Duplicating house...', variant: 'info' });
+        const payload = { ...property };
+        delete payload._id;
+        delete payload.id;
+        payload.title = `${property.title} Copy`;
+        payload.propertyType = 'House';
+        payload.category = 'House';
+        payload.createdAt = new Date().toISOString();
+        payload.updatedAt = new Date().toISOString();
+        const saved = await createAdminProperty(payload);
+        const finalProperty = saved || { ...payload, _id: payload._id || generateId('prop') };
+        await refreshProperties();
+        setEditingId(getPropertyId(finalProperty) || null);
+        setFormData({
+          title: finalProperty.title || '',
+          propertyType: 'House',
+          category: 'House',
+          description: finalProperty.description || '',
+          price: finalProperty.price || '',
+          rent: finalProperty.rent || '',
+          salePrice: finalProperty.salePrice || '',
+          deposit: finalProperty.deposit || '',
+          otherCharges: finalProperty.otherCharges || '',
+          location: finalProperty.location || '',
+          city: finalProperty.city || '',
+          address: finalProperty.address || '',
+          bedrooms: finalProperty.bedrooms || '',
+          bathrooms: finalProperty.bathrooms || '',
+          area: finalProperty.area || '',
+          furnished: finalProperty.furnished || 'Fully Furnished',
+          floor: finalProperty.floor || '',
+          totalFloors: finalProperty.totalFloors || '',
+          ownerName: finalProperty.ownerName || '',
+          ownerPhone: finalProperty.ownerPhone || '',
+          ownerEmail: finalProperty.ownerEmail || '',
+          image: finalProperty.image || '',
+          status: finalProperty.status || 'Available',
+        });
+        setErrors({});
+        setModalOpen(true);
+        addActivity('House duplicated', `${property.title} was duplicated and opened for editing.`);
+        notify && notify({ message: 'House duplicated and opened for editing.', variant: 'success' });
+      } catch (e) {
+        console.error('Duplicate house failed', e);
+        notify && notify({ message: e?.message || 'Unable to duplicate house.', variant: 'error' });
+      }
+    })();
   };
 
   const paymentHistory = (appData.payments || []).filter((payment) => (payment.propertyName || payment.property) === (selectedProperty?.title || ''));
@@ -340,10 +430,18 @@ function HousesPage({ appData, setAppData, notify }) {
                 </tr>
               </thead>
               <tbody>
-                {filteredProperties.map((property) => (
-                  <tr key={property.id}>
+                {filteredProperties.map((property, index) => (
+                  <tr key={getPropertyId(property) || property.id}>
                     <td>
-                      <img src={property.image || 'https://images.unsplash.com/photo-1568605114967-8130f3a36994?auto=format&fit=crop&w=300&q=80'} alt={property.title} className="property-thumb" />
+                      <img
+                        src={getPropertyImageUrl(property, index)}
+                        alt={property.title || 'House'}
+                        className="property-thumb"
+                        onError={(event) => {
+                          event.currentTarget.onerror = null;
+                          event.currentTarget.src = HOUSE_DEFAULT_IMAGES[index % HOUSE_DEFAULT_IMAGES.length] || HOUSE_DEFAULT_IMAGE;
+                        }}
+                      />
                     </td>
                     <td>
                       <strong>{property.title}</strong>
@@ -353,7 +451,7 @@ function HousesPage({ appData, setAppData, notify }) {
                     <td>{formatCurrency(property.price || property.salePrice || 0)}</td>
                     <td>{property.ownerName}</td>
                     <td>
-                      <select value={property.status} onChange={(event) => changeStatus(property.id, event.target.value)} className="status-select">
+                      <select value={property.status} onChange={(event) => changeStatus(getPropertyId(property), event.target.value)} className="status-select">
                         {statusOptions.map((status) => (
                           <option key={status} value={status}>{status}</option>
                         ))}
@@ -365,7 +463,7 @@ function HousesPage({ appData, setAppData, notify }) {
                         <button type="button" className="table-button light" onClick={() => openEditModal(property)}>Edit</button>
                         <button type="button" className="table-button light" onClick={() => { setSelectedProperty(property); setManageModalOpen(true); }}>Manage</button>
                         <button type="button" className="table-button light" onClick={() => duplicateProperty(property)}>Copy & Edit</button>
-                        <button type="button" className="table-button danger" onClick={() => setDeletingId(property.id)}>Delete</button>
+                        <button type="button" className="table-button danger" onClick={() => setDeletingId(getPropertyId(property))}>Delete</button>
                       </div>
                     </td>
                   </tr>
@@ -515,7 +613,7 @@ function HousesPage({ appData, setAppData, notify }) {
             Main image
             <input type="file" accept="image/*" onChange={handleImagePick} />
           </label>
-          {formData.image && <img src={formData.image} alt="Preview" className="image-preview" />}
+          {formData.image && <img src={normalizeImageUrl(formData.image)} alt="Preview" className="image-preview" onError={(event) => { event.currentTarget.onerror = null; event.currentTarget.src = HOUSE_DEFAULT_IMAGE; }} />}
         </form>
       </Modal>
 
@@ -528,14 +626,22 @@ function HousesPage({ appData, setAppData, notify }) {
         {selectedProperty && (
           <div className="manage-property-panel">
             <div className="detail-header">
-              <img src={selectedProperty.image} alt={selectedProperty.title} className="property-thumb large" />
+              <img
+                src={getPropertyImageUrl(selectedProperty, 0)}
+                alt={selectedProperty.title || 'House'}
+                className="property-thumb large"
+                onError={(event) => {
+                  event.currentTarget.onerror = null;
+                  event.currentTarget.src = HOUSE_DEFAULT_IMAGE;
+                }}
+              />
               <div>
                 <h4>{selectedProperty.title}</h4>
                 <p>{selectedProperty.propertyType} • {selectedProperty.location}</p>
               </div>
             </div>
             <div className="detail-grid">
-              <div><strong>House ID:</strong> <span>{selectedProperty.id}</span></div>
+              <div><strong>House ID:</strong> <span>{getPropertyId(selectedProperty)}</span></div>
               <div><strong>Status:</strong> <span>{selectedProperty.status}</span></div>
               <div><strong>Price:</strong> <span>{formatCurrency(selectedProperty.price || 0)}</span></div>
               <div><strong>Rent:</strong> <span>{formatCurrency(selectedProperty.rent || 0)}</span></div>

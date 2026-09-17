@@ -1,7 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import './BookingsPage.css';
 import Modal from '../components/Modal';
 import { formatCurrency, formatDate } from '../utils/formatters';
+import { approveAdminBooking, rejectAdminBooking } from '../services/adminBookingService';
+import { apiService } from '../services/api';
 
 const emptyForm = {
   customerName: '',
@@ -20,6 +23,7 @@ const emptyForm = {
 function BookingsPage({ appData, setAppData, notify, onBookingDecision }) {
   const bookings = appData.bookings || [];
   const properties = appData.properties || [];
+  const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
   const [paymentFilter, setPaymentFilter] = useState('All');
@@ -28,16 +32,56 @@ function BookingsPage({ appData, setAppData, notify, onBookingDecision }) {
   const [formData, setFormData] = useState(emptyForm);
   const [errors, setErrors] = useState({});
   const [deletingId, setDeletingId] = useState(null);
+  const [loadingBookings, setLoadingBookings] = useState(false);
+  const [processingBookingId, setProcessingBookingId] = useState(null);
+
+  useEffect(() => {
+    const loadBookings = async () => {
+      try {
+        setLoadingBookings(true);
+        const response = await apiService.request('/bookings');
+        if (response?.success) {
+          setAppData((prev) => ({ ...prev, bookings: response.data || [] }));
+        }
+      } catch (error) {
+        console.warn('Unable to load bookings from backend:', error?.message || error);
+      }
+      finally {
+        setLoadingBookings(false);
+      }
+    };
+
+    loadBookings();
+  }, [setAppData]);
+
+  const getBookingId = (booking) => booking?._id || booking?.id || booking?.bookingId || 'N/A';
 
   const filteredBookings = useMemo(() => {
     const next = [...bookings].filter((booking) => {
-      const matchesSearch = !search || [booking.customerName, booking.propertyTitle].join(' ').toLowerCase().includes(search.toLowerCase());
-      const matchesStatus = statusFilter === 'All' || booking.bookingStatus === statusFilter;
-      const matchesPayment = paymentFilter === 'All' || booking.paymentStatus === paymentFilter;
+      const customer = booking.customerName || booking.userName || booking.customer || booking.name || '';
+      const property = booking.propertyTitle || booking.propertyName || booking.property || '';
+      const matchesSearch = !search || [customer, property, getBookingId(booking)].join(' ').toLowerCase().includes(search.toLowerCase());
+      const matchesStatus = statusFilter === 'All' || String(booking.bookingStatus || booking.status || '').toLowerCase() === statusFilter.toLowerCase();
+      const matchesPayment = paymentFilter === 'All' || String(booking.paymentStatus || booking.payment || '').toLowerCase() === paymentFilter.toLowerCase();
       return matchesSearch && matchesStatus && matchesPayment;
     });
-    return next.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+    return next.sort((a, b) => new Date(b.createdAt || b.updatedAt || 0) - new Date(a.createdAt || a.updatedAt || 0));
   }, [bookings, search, statusFilter, paymentFilter]);
+
+  const bookingStats = useMemo(() => {
+    const counts = bookings.reduce((acc, booking) => {
+      acc.total += 1;
+      const bookingStatus = String(booking.bookingStatus || booking.status || '').toLowerCase();
+      const paymentStatus = String(booking.paymentStatus || booking.payment || '').toLowerCase();
+      if (bookingStatus === 'approved') acc.approved += 1;
+      if (bookingStatus === 'pending') acc.pending += 1;
+      if (paymentStatus === 'paid') acc.paid += 1;
+      acc.value += Number(booking.amount || 0);
+      return acc;
+    }, { total: 0, approved: 0, pending: 0, paid: 0, value: 0 });
+
+    return counts;
+  }, [bookings]);
 
   const addActivity = (action, details) => {
     setAppData((prev) => ({
@@ -63,19 +107,19 @@ function BookingsPage({ appData, setAppData, notify, onBookingDecision }) {
   };
 
   const openEditModal = (booking) => {
-    setEditingId(booking.id);
+    setEditingId(getBookingId(booking));
     setFormData({
-      customerName: booking.customerName,
-      customerPhone: booking.customerPhone,
-      propertyId: booking.propertyId,
-      propertyTitle: booking.propertyTitle,
-      propertyType: booking.propertyType,
-      bookingDate: booking.bookingDate,
-      visitDate: booking.visitDate,
-      amount: booking.amount,
-      paymentStatus: booking.paymentStatus,
-      bookingStatus: booking.bookingStatus,
-      notes: booking.notes,
+      customerName: booking.customerName || booking.userName || '',
+      customerPhone: booking.customerPhone || booking.phone || '',
+      propertyId: booking.propertyId || '',
+      propertyTitle: booking.propertyTitle || booking.propertyName || '',
+      propertyType: booking.propertyType || 'House',
+      bookingDate: booking.bookingDate || '',
+      visitDate: booking.visitDate || '',
+      amount: booking.amount || '',
+      paymentStatus: booking.paymentStatus || booking.payment || 'Pending',
+      bookingStatus: booking.bookingStatus || booking.status || 'Pending',
+      notes: booking.notes || '',
     });
     setErrors({});
     setModalOpen(true);
@@ -89,52 +133,127 @@ function BookingsPage({ appData, setAppData, notify, onBookingDecision }) {
       return;
     }
 
+    if (editingId) {
+      notify({ message: 'Booking edits are managed through the approval workflow on the backend. Use the approval/rejection actions instead.', variant: 'info' });
+      return;
+    }
+
     const selectedProperty = properties.find((item) => item.id === formData.propertyId) || properties.find((item) => item.title === formData.propertyTitle);
     const payload = {
-      id: editingId || `bk-${Date.now().toString().slice(-6)}`,
-      bookingId: editingId || `bk-${Date.now().toString().slice(-6)}`,
+      userName: formData.customerName.trim(),
+      userEmail: '',
       customerName: formData.customerName.trim(),
       customerPhone: formData.customerPhone.trim(),
-      propertyId: selectedProperty?.id || formData.propertyId || 'prop-temp',
+      propertyId: selectedProperty?._id || selectedProperty?.id || formData.propertyId || '',
+      propertyName: selectedProperty?.title || formData.propertyTitle.trim(),
       propertyTitle: selectedProperty?.title || formData.propertyTitle.trim(),
       propertyType: selectedProperty?.propertyType || formData.propertyType,
       bookingDate: formData.bookingDate || new Date().toISOString().slice(0, 10),
       visitDate: formData.visitDate || new Date().toISOString().slice(0, 10),
       amount: Number(formData.amount || 0),
+      rent: Number(formData.amount || 0),
       paymentStatus: formData.paymentStatus,
       bookingStatus: formData.bookingStatus,
+      status: formData.bookingStatus,
       notes: formData.notes.trim(),
-      createdAt: editingId ? bookings.find((item) => item.id === editingId)?.createdAt || new Date().toISOString() : new Date().toISOString(),
+      message: formData.notes.trim(),
     };
 
-    setAppData((prev) => ({
-      ...prev,
-      bookings: editingId ? (prev.bookings || []).map((item) => (item.id === editingId ? payload : item)) : [payload, ...(prev.bookings || [])],
-    }));
-    addActivity(editingId ? 'Booking edited' : 'Booking added', `${payload.customerName}'s booking was ${editingId ? 'updated' : 'added'}.`);
-    notify({ message: editingId ? 'Booking updated successfully.' : 'Booking created successfully.', variant: 'success' });
-    setModalOpen(false);
-    setEditingId(null);
-    setFormData(emptyForm);
+    apiService.request('/bookings', { method: 'POST', body: payload })
+      .then((response) => {
+        const createdBooking = response?.data || null;
+        if (createdBooking) {
+          setAppData((prev) => ({ ...prev, bookings: [createdBooking, ...(prev.bookings || [])] }));
+        }
+        addActivity('Booking added', `${payload.customerName}'s booking was added.`);
+        notify({ message: 'Booking created successfully.', variant: 'success' });
+        setModalOpen(false);
+        setEditingId(null);
+        setFormData(emptyForm);
+      })
+      .catch((error) => {
+        console.error('Create booking failed:', error);
+        notify({ message: error.message || 'Unable to create booking.', variant: 'error' });
+      });
   };
 
-  const handleDecision = (bookingId, status) => {
-    onBookingDecision?.(bookingId, status);
-    setAppData((prev) => ({
-      ...prev,
-      bookings: (prev.bookings || []).map((item) => item.id === bookingId ? { ...item, bookingStatus: status } : item),
-    }));
+  const handleDecision = async (bookingId, status) => {
+    try {
+      const booking = (bookings || []).find((item) => String(getBookingId(item)) === String(bookingId) || String(item.id) === String(bookingId) || String(item._id) === String(bookingId));
+      const targetId = booking?._id || booking?.id || bookingId;
+
+      setProcessingBookingId(targetId);
+
+      if (status === 'Approved') {
+        await approveAdminBooking(targetId);
+      } else {
+        await rejectAdminBooking(targetId, `Booking marked as ${status.toLowerCase()} by admin.`);
+      }
+
+      onBookingDecision?.(bookingId, status);
+      setAppData((prev) => ({
+        ...prev,
+        bookings: (prev.bookings || []).map((item) =>
+          String(getBookingId(item)) === String(bookingId) || String(item.id) === String(bookingId) || String(item._id) === String(bookingId)
+            ? {
+                ...item,
+                bookingStatus: status,
+                status,
+                paymentStatus: status === 'Approved' ? 'Paid' : item.paymentStatus || item.payment || 'Pending',
+              }
+            : item,
+        ),
+      }));
+      notify({ message: `Booking ${status.toLowerCase()} successfully.`, variant: 'success' });
+    } catch (error) {
+      console.error('Booking decision failed:', error);
+      notify({ message: error.message || 'Unable to update booking status.', variant: 'error' });
+    }
+    finally {
+      setProcessingBookingId(null);
+    }
   };
 
-  const deleteBooking = (bookingId) => {
-    setAppData((prev) => ({ ...prev, bookings: (prev.bookings || []).filter((item) => item.id !== bookingId) }));
-    addActivity('Booking deleted', 'A booking record was removed.');
-    notify({ message: 'Booking deleted successfully.', variant: 'success' });
+  const deleteBooking = async (bookingId) => {
+    try {
+      const booking = (bookings || []).find((item) => String(getBookingId(item)) === String(bookingId) || String(item.id) === String(bookingId) || String(item._id) === String(bookingId));
+      const targetId = booking?._id || booking?.id || bookingId;
+      if (targetId) {
+        await apiService.request(`/bookings/${targetId}`, {
+          method: 'DELETE',
+        });
+      }
+      setAppData((prev) => ({ ...prev, bookings: (prev.bookings || []).filter((item) => String(getBookingId(item)) !== String(bookingId) && String(item.id) !== String(bookingId) && String(item._id) !== String(bookingId)) }));
+      addActivity('Booking deleted', 'A booking record was removed.');
+      notify({ message: 'Booking deleted successfully.', variant: 'success' });
+    } catch (error) {
+      console.error('Booking delete failed:', error);
+      notify({ message: error.message || 'Unable to delete booking.', variant: 'error' });
+    }
     setDeletingId(null);
   };
 
   return (
     <div className="page-section bookings-page">
+      <div className="summary-strip booking-strip">
+        <div className="summary-item primary">
+          <span>Total bookings</span>
+          <strong>{bookingStats.total}</strong>
+        </div>
+        <div className="summary-item success">
+          <span>Approved</span>
+          <strong>{bookingStats.approved}</strong>
+        </div>
+        <div className="summary-item danger">
+          <span>Pending</span>
+          <strong>{bookingStats.pending}</strong>
+        </div>
+        <div className="summary-item info">
+          <span>Pipeline value</span>
+          <strong>{formatCurrency(bookingStats.value)}</strong>
+        </div>
+      </div>
+
       <section className="panel-card toolbar-card">
         <div className="toolbar-row">
           <div className="toolbar-search">
@@ -189,25 +308,32 @@ function BookingsPage({ appData, setAppData, notify, onBookingDecision }) {
                 </tr>
               </thead>
               <tbody>
-                {filteredBookings.map((booking) => (
-                  <tr key={booking.id}>
-                    <td>{booking.id}</td>
-                    <td>{booking.customerName}</td>
-                    <td>{booking.propertyTitle}</td>
-                    <td>{formatCurrency(booking.amount)}</td>
-                    <td><span className={`status-badge ${String(booking.bookingStatus).toLowerCase()}`}>{booking.bookingStatus}</span></td>
-                    <td><span className={`status-badge ${String(booking.paymentStatus).toLowerCase()}`}>{booking.paymentStatus}</span></td>
-                    <td>{formatDate(booking.visitDate)}</td>
-                    <td>
-                      <div className="table-actions">
-                        <button type="button" className="table-button light" onClick={() => openEditModal(booking)}>Edit</button>
-                        <button type="button" className="table-button light" onClick={() => handleDecision(booking.id, 'Approved')}>Approve</button>
-                        <button type="button" className="table-button light" onClick={() => handleDecision(booking.id, 'Rejected')}>Reject</button>
-                        <button type="button" className="table-button danger" onClick={() => setDeletingId(booking.id)}>Delete</button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {filteredBookings.map((booking) => {
+                  const bookingId = getBookingId(booking);
+                  const customerName = booking.customerName || booking.userName || 'Unknown';
+                  const propertyTitle = booking.propertyTitle || booking.propertyName || 'Unknown';
+
+                  return (
+                    <tr key={bookingId}>
+                      <td>{bookingId}</td>
+                      <td>{customerName}</td>
+                      <td>{propertyTitle}</td>
+                      <td>{formatCurrency(booking.amount || 0)}</td>
+                      <td><span className={`status-badge ${String(booking.bookingStatus || booking.status || 'pending').toLowerCase()}`}>{booking.bookingStatus || booking.status || 'Pending'}</span></td>
+                      <td><span className={`status-badge ${String(booking.paymentStatus || booking.payment || 'pending').toLowerCase()}`}>{booking.paymentStatus || booking.payment || 'Pending'}</span></td>
+                      <td>{formatDate(booking.visitDate || booking.bookingDate)}</td>
+                      <td>
+                        <div className="table-actions">
+                          <button type="button" className="table-button light" onClick={() => navigate(`/admin/tenant-profile/${encodeURIComponent(customerName || bookingId)}`)}>Profile</button>
+                          <button type="button" className="table-button light" onClick={() => openEditModal(booking)}>Edit</button>
+                          <button type="button" className="table-button light" onClick={() => handleDecision(bookingId, 'Approved')} disabled={processingBookingId === (booking._id || booking.id || bookingId)}>{processingBookingId === (booking._id || booking.id || bookingId) ? 'Processing...' : 'Approve'}</button>
+                          <button type="button" className="table-button light" onClick={() => handleDecision(bookingId, 'Rejected')} disabled={processingBookingId === (booking._id || booking.id || bookingId)}>{processingBookingId === (booking._id || booking.id || bookingId) ? 'Processing...' : 'Reject'}</button>
+                          <button type="button" className="table-button danger" onClick={() => setDeletingId(bookingId)}>Delete</button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

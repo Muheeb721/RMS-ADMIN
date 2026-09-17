@@ -4,6 +4,11 @@ export const STORAGE_KEYS = {
   bookings: 'rms_admin_bookings',
   payments: 'rms_admin_payments',
   dues: 'rms_admin_dues',
+  tenants: 'rms_tenants',
+  rentRecords: 'rms_rent_records',
+  rentPayments: 'rms_rent_payments',
+  rentReminders: 'rms_rent_reminders',
+  rentSettings: 'rms_rent_settings',
   notifications: 'rms_admin_notifications',
   settings: 'rms_admin_settings',
   profile: 'rms_admin_profile',
@@ -16,6 +21,58 @@ export const LOGIN_CREDENTIALS_KEY = 'rms_admin_login_credentials';
 export const generateId = (prefix = 'id') => {
   const randomPart = Math.random().toString(36).slice(2, 8);
   return `${prefix}-${Date.now()}-${randomPart}`;
+};
+
+export const generateTenantId = (tenants = []) => {
+  const next = (tenants.length || 0) + 1;
+  return `TEN-${String(next).padStart(3, '0')}`;
+};
+
+const monthKey = (date) => {
+  const d = new Date(date);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  return `${y}-${m}`;
+};
+
+export const generateRentRecordId = (date, existing = []) => {
+  const key = monthKey(date);
+  const count = (existing || []).filter((r) => r.id && r.id.includes(`RENT-${key}`)).length + 1;
+  return `RENT-${key}-${String(count).padStart(3, '0')}`;
+};
+
+export const generateRentPaymentId = (date, existing = []) => {
+  const key = monthKey(date);
+  const count = (existing || []).filter((p) => p.id && p.id.includes(`RPAY-${key}`)).length + 1;
+  return `RPAY-${key}-${String(count).padStart(3, '0')}`;
+};
+
+export const generateReminderId = (date, existing = []) => {
+  const key = monthKey(date);
+  const count = (existing || []).filter((r) => r.id && r.id.includes(`REM-${key}`)).length + 1;
+  return `REM-${key}-${String(count).padStart(3, '0')}`;
+};
+
+export const calculateRentStatus = (record, settings = {}) => {
+  const today = new Date();
+  if (!record) return 'Upcoming';
+  const due = record.dueDate ? new Date(record.dueDate) : null;
+  const rent = Number(record.amount || record.monthlyRent || 0);
+  const paid = Number(record.paidAmount || 0);
+  const remaining = Math.max(rent - paid, 0);
+
+  if (paid >= rent) return 'Paid';
+  if (paid > 0 && paid < rent) return 'Partial';
+  if (!due) return 'Upcoming';
+
+  // consider grace period
+  const grace = Number((settings && settings.gracePeriod) || 0);
+  const dueWithGrace = new Date(due);
+  dueWithGrace.setDate(dueWithGrace.getDate() + grace);
+
+  if (today > dueWithGrace) return 'Overdue';
+  if (today.toDateString() === dueWithGrace.toDateString() || today <= dueWithGrace) return 'Due';
+  return 'Upcoming';
 };
 
 const safeParse = (value, fallback) => {
@@ -216,6 +273,25 @@ export const buildDefaultState = () => ({
       lastActivity: '2026-08-11T08:15:00.000Z',
     },
   ],
+  tenants: [
+    {
+      id: 'TEN-001',
+      fullName: 'Ali Khan',
+      email: 'ali.khan@example.com',
+      phone: '+92 300 5550001',
+      cnic: '42101-1234567-1',
+      propertyId: 'prop-101',
+      propertyName: 'Pearl Residency',
+      unit: 'A-101',
+      monthlyRent: 50000,
+      securityDeposit: 50000,
+      leaseStart: '2026-06-01',
+      leaseEnd: '2027-05-31',
+      dueDay: 10,
+      status: 'Active',
+      createdAt: '2026-08-01T09:00:00.000Z',
+    },
+  ],
   bookings: [
     {
       id: 'bk-1001',
@@ -409,19 +485,37 @@ export const buildDefaultState = () => ({
 
 export const loadAppData = () => {
   if (typeof window === 'undefined') return buildDefaultState();
-
+  // Forcing admin app to use backend as source-of-truth for business data.
+  // Keep only minimal defaults for UI so components will fetch from APIs.
   const defaultState = buildDefaultState();
-  const nextState = { ...defaultState };
+  const nextState = {
+    admin: { ...defaultState.admin },
+    properties: [],
+    users: [],
+    bookings: [],
+    payments: [],
+    dues: [],
+    tenants: [],
+    rentRecords: [],
+    rentPayments: [],
+    rentReminders: [],
+    rentSettings: defaultState.rentSettings || {},
+    notifications: [],
+    settings: readStorage(STORAGE_KEYS.settings, defaultState.settings),
+    profile: defaultState.profile,
+    activityLogs: [],
+  };
 
-  Object.entries(STORAGE_KEYS).forEach(([keyName, storageKey]) => {
-    const fallback = defaultState[keyName] ?? [];
-    const data = readStorage(storageKey, fallback);
-    nextState[keyName] = data;
-  });
-
-  const profileData = readStorage(STORAGE_KEYS.profile, defaultState.profile);
-  nextState.profile = { ...defaultState.profile, ...profileData };
-  nextState.admin = { ...defaultState.admin, ...profileData };
+  // preserve any lightweight UI settings stored earlier
+  try {
+    const profileData = readStorage(STORAGE_KEYS.profile, null);
+    if (profileData) {
+      nextState.profile = { ...nextState.profile, ...profileData };
+      nextState.admin = { ...nextState.admin, ...profileData };
+    }
+  } catch (e) {
+    // ignore malformed profile in localStorage
+  }
 
   return nextState;
 };
@@ -429,15 +523,11 @@ export const loadAppData = () => {
 export const persistAppData = (appData) => {
   if (typeof window === 'undefined') return;
 
-  const data = appData ?? buildDefaultState();
-
-  Object.entries(STORAGE_KEYS).forEach(([keyName, storageKey]) => {
-    if (data[keyName] !== undefined) {
-      writeStorage(storageKey, data[keyName]);
-    }
-  });
-
+  // Persist only non-business UI settings. Business data must come from backend.
+  const data = appData ?? {};
+  if (data.settings) writeStorage(STORAGE_KEYS.settings, data.settings);
   if (data.profile) {
+    // allow profile to be stored as lightweight cached view only
     writeStorage(STORAGE_KEYS.profile, data.profile);
     writeStorage('rms_admin_admin', data.profile);
   }

@@ -1,68 +1,132 @@
-import { useMemo } from 'react';
+import { useMemo, useEffect, useState } from 'react';
 import './DashboardPage.css';
 import { formatCurrency, formatDate } from '../utils/formatters';
+import { apiService } from '../services/api';
 
-function DashboardPage({ appData }) {
+function DashboardPage({ appData, setAppData }) {
+  const [loading, setLoading] = useState(false);
   const properties = appData.properties || [];
   const bookings = appData.bookings || [];
   const payments = appData.payments || [];
   const dues = appData.dues || [];
   const users = appData.users || [];
+  const tenants = appData.tenants || [];
   const activityLogs = appData.activityLogs || [];
+
+  const normalizeValue = (value) => String(value ?? '').trim().toLowerCase();
+  const matchesAnyStatus = (value, statuses = []) => statuses.some((status) => normalizeValue(value) === normalizeValue(status));
 
   const stats = useMemo(() => {
     const totalProperties = properties.length;
-    const availableProperties = properties.filter((item) => item.status === 'Available').length;
-    const reservedProperties = properties.filter((item) => item.status === 'Reserved').length;
-    const soldProperties = properties.filter((item) => item.status === 'Sold').length;
-    const forRentProperties = properties.filter((item) => item.status === 'For Rent').length;
+    const availableProperties = properties.filter((item) => matchesAnyStatus(item.status, ['available', 'vacant', 'open'])).length;
+    const rentedProperties = properties.filter((item) => matchesAnyStatus(item.status, ['for rent', 'rented', 'occupied', 'leased'])).length;
+    const reservedProperties = properties.filter((item) => matchesAnyStatus(item.status, ['reserved', 'holding'])).length;
+    const soldProperties = properties.filter((item) => matchesAnyStatus(item.status, ['sold', 'sold out'])).length;
+    const pendingBookings = bookings.filter((item) => matchesAnyStatus(item.bookingStatus || item.status, ['pending', 'in review', 'awaiting approval'])).length;
+    const pendingPayments = payments.filter((item) => !matchesAnyStatus(item.status, ['paid', 'approved', 'completed', 'success', 'settled'])).length;
     const totalRevenue = payments
-      .filter((payment) => payment.status === 'Paid')
-      .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
-    const pendingPayments = payments.filter((payment) => payment.status === 'Pending').length;
+      .filter((payment) => matchesAnyStatus(payment.status, ['paid', 'approved', 'completed', 'success', 'settled']))
+      .reduce((sum, payment) => sum + Number(payment.amount || payment.totalAmount || 0), 0);
     const outstandingDues = dues
-      .filter((due) => due.paymentStatus !== 'Paid')
-      .reduce((sum, due) => sum + Number(due.remainingAmount || due.currentCharge || 0), 0);
+      .filter((due) => !matchesAnyStatus(due.paymentStatus || due.status, ['paid', 'completed', 'settled']))
+      .reduce((sum, due) => sum + Number(due.remainingAmount || due.currentCharge || due.amount || 0), 0);
+    const activeTenants = tenants.filter((tenant) => matchesAnyStatus(tenant.status, ['active', 'current'])).length;
+    const maintenanceCount = (appData.maintenanceItems || []).filter((item) => !matchesAnyStatus(item.status, ['resolved', 'completed', 'closed'])).length;
 
     return {
       totalProperties,
       availableProperties,
+      rentedProperties,
       reservedProperties,
       soldProperties,
-      forRentProperties,
-      totalUsers: users.length,
-      totalBookings: bookings.length,
-      totalRevenue,
+      pendingBookings,
       pendingPayments,
+      totalUsers: users.length,
+      totalRevenue,
       outstandingDues,
+      activeTenants,
+      maintenanceCount,
     };
-  }, [properties, payments, dues, users, bookings]);
+  }, [properties, payments, dues, users, bookings, tenants, appData.maintenanceItems]);
+
+  const rentStats = useMemo(() => {
+    const rentRecords = appData.rentRecords || [];
+    const rentPayments = appData.rentPayments || [];
+    const totalMonthly = rentRecords.reduce((s, r) => s + Number(r.monthlyRent || r.amount || 0), 0);
+    const collectedThisMonth = rentPayments
+      .filter((p) => p.date && new Date(p.date).getMonth() === new Date().getMonth())
+      .reduce((s, p) => s + Number(p.amount || 0), 0);
+    const pending = rentRecords.filter((r) => ['due', 'pending', 'partial', 'upcoming'].includes(String(r.status || '').toLowerCase())).reduce((s, r) => s + Number(r.remainingAmount || r.amount || 0), 0);
+    const overdue = rentRecords.filter((r) => String(r.status || '').toLowerCase() === 'overdue').reduce((s, r) => s + Number(r.remainingAmount || r.amount || 0), 0);
+    return { totalMonthly, collectedThisMonth, pending, overdue };
+  }, [appData]);
 
   const cards = [
-    { label: 'Total Properties', value: stats.totalProperties, icon: '🏠', tone: 'primary' },
+    { label: 'Total Users', value: stats.totalUsers, icon: '👥', tone: 'primary' },
+    { label: 'Active Tenants', value: stats.activeTenants, icon: '🏠', tone: 'success' },
+    { label: 'Total Properties', value: stats.totalProperties, icon: '🏘️', tone: 'primary' },
     { label: 'Available Properties', value: stats.availableProperties, icon: '✅', tone: 'success' },
+    { label: 'Rented Properties', value: stats.rentedProperties, icon: '📌', tone: 'info' },
     { label: 'Reserved Properties', value: stats.reservedProperties, icon: '🟡', tone: 'warning' },
     { label: 'Sold Properties', value: stats.soldProperties, icon: '🔴', tone: 'danger' },
-    { label: 'Properties For Rent', value: stats.forRentProperties, icon: '🏢', tone: 'info' },
-    { label: 'Total Users', value: stats.totalUsers, icon: '👥', tone: 'primary' },
-    { label: 'Total Bookings', value: stats.totalBookings, icon: '📅', tone: 'success' },
-    { label: 'Total Revenue', value: formatCurrency(stats.totalRevenue), icon: '💰', tone: 'warning' },
+    { label: 'Pending Bookings', value: stats.pendingBookings, icon: '📅', tone: 'warning' },
     { label: 'Pending Payments', value: stats.pendingPayments, icon: '⏳', tone: 'info' },
-    { label: 'Outstanding Dues', value: formatCurrency(stats.outstandingDues), icon: '📄', tone: 'danger' },
+    { label: 'Monthly Revenue', value: formatCurrency(stats.totalRevenue), icon: '💰', tone: 'success' },
+    { label: 'Rent Due', value: formatCurrency(stats.outstandingDues), icon: '📄', tone: 'danger' },
+    { label: 'Maintenance Requests', value: stats.maintenanceCount, icon: '🛠️', tone: 'warning' },
   ];
 
   const statusBreakdown = [
-    { label: 'Available', value: properties.filter((item) => item.status === 'Available').length, color: '#16a34a' },
-    { label: 'Reserved', value: properties.filter((item) => item.status === 'Reserved').length, color: '#f59e0b' },
-    { label: 'Sold', value: properties.filter((item) => item.status === 'Sold').length, color: '#dc2626' },
-    { label: 'For Rent', value: properties.filter((item) => item.status === 'For Rent').length, color: '#0ea5e9' },
+    { label: 'Available', value: properties.filter((item) => matchesAnyStatus(item.status, ['available', 'vacant', 'open'])).length, color: '#16a34a' },
+    { label: 'Reserved', value: properties.filter((item) => matchesAnyStatus(item.status, ['reserved', 'holding'])).length, color: '#f59e0b' },
+    { label: 'Sold', value: properties.filter((item) => matchesAnyStatus(item.status, ['sold', 'sold out'])).length, color: '#dc2626' },
+    { label: 'For Rent', value: properties.filter((item) => matchesAnyStatus(item.status, ['for rent', 'rented', 'occupied', 'leased'])).length, color: '#0ea5e9' },
   ];
 
   const recentTransactions = [...payments]
     .sort((a, b) => new Date(b.paymentDate || b.date || 0) - new Date(a.paymentDate || a.date || 0))
     .slice(0, 5);
 
+  const getActivityKey = (item, index) => item?.id || item?._id || `${item?.action || 'activity'}-${item?.timestamp || 'unknown'}-${index}`;
   const maxStatusValue = Math.max(...statusBreakdown.map((item) => item.value), 1);
+
+  useEffect(() => {
+    const loadDashboard = async () => {
+      try {
+        setLoading(true);
+        const needs = !(appData.properties || []).length || !(appData.users || []).length || !(appData.bookings || []).length;
+        if (!needs) {
+          setLoading(false);
+          return;
+        }
+        const resp = await apiService.request('/admin/dashboard');
+        if (resp?.success && resp.data) {
+          setAppData((prev) => ({ ...prev, ...resp.data }));
+        }
+      } catch (e) {
+        console.warn('Unable to load dashboard data', e?.message || e);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadDashboard();
+  }, [setAppData, appData.properties, appData.users, appData.bookings]);
+
+  if (loading && !properties.length && !users.length && !bookings.length) {
+    return (
+      <div className="page-section dashboard-page">
+        <section className="panel-card"><div className="skeleton skeleton-line short" /></section>
+        <div className="stats-grid dashboard-stats">
+          {Array.from({ length: 12 }).map((_, index) => (
+            <div key={`skeleton-stat-${index}`} className="stat-card skeleton-card">
+              <div className="skeleton skeleton-line" />
+              <div className="skeleton skeleton-box" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="page-section dashboard-page">
@@ -75,8 +139,8 @@ function DashboardPage({ appData }) {
       </section>
 
       <div className="stats-grid dashboard-stats">
-        {cards.map((card) => (
-          <div key={card.label} className={`stat-card tone-${card.tone}`}>
+        {cards.map((card, index) => (
+          <div key={`${card.label || 'card'}-${index}`} className={`stat-card tone-${card.tone}`}>
             <div className="stat-card-icon">{card.icon}</div>
             <p>{card.label}</p>
             <h3>{card.value}</h3>
@@ -92,8 +156,8 @@ function DashboardPage({ appData }) {
             <span className="mini-badge">Live data</span>
           </div>
           <div className="status-list">
-            {statusBreakdown.map((item) => (
-              <div key={item.label} className="status-row">
+            {statusBreakdown.map((item, index) => (
+              <div key={`${item.label || 'status'}-${index}`} className="status-row">
                 <div className="status-info">
                   <span className="status-dot" style={{ background: item.color }} />
                   <span>{item.label}</span>
@@ -113,8 +177,8 @@ function DashboardPage({ appData }) {
             <span className="mini-badge">Updated</span>
           </div>
           <div className="activity-list">
-            {activityLogs.slice(0, 5).map((item) => (
-              <div key={item.id} className="activity-row">
+            {activityLogs.slice(0, 5).map((item, index) => (
+              <div key={`activity-${item?.id || item?._id || item?.action || 'unknown'}-${index}`} className="activity-row">
                 <div className="dot-indicator" />
                 <div>
                   <strong>{item.action}</strong>
@@ -147,8 +211,8 @@ function DashboardPage({ appData }) {
                 </tr>
               </thead>
               <tbody>
-                {recentTransactions.map((payment) => (
-                  <tr key={payment.id || payment.paymentId}>
+                {recentTransactions.map((payment, index) => (
+                  <tr key={`${payment.id || payment.paymentId || 'payment'}-${index}`}>
                     <td>{payment.paymentId || payment.id}</td>
                     <td>{payment.userName || payment.user}</td>
                     <td>{payment.propertyName || payment.property}</td>
@@ -179,8 +243,8 @@ function DashboardPage({ appData }) {
                 </tr>
               </thead>
               <tbody>
-                {bookings.slice(0, 5).map((booking) => (
-                  <tr key={booking.id}>
+                {bookings.slice(0, 5).map((booking, index) => (
+                  <tr key={`${booking.id || booking.bookingId || 'booking'}-${index}`}>
                     <td>{booking.customerName}</td>
                     <td>{booking.propertyTitle}</td>
                     <td>{formatCurrency(booking.amount)}</td>

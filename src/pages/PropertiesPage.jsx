@@ -1,8 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import './PropertiesPage.css';
 import Modal from '../components/Modal';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import { generateId } from '../services/localStorage';
+import { apiService } from '../services/api';
+import { createAdminProperty, deleteAdminProperty, updateAdminProperty, uploadPropertyImage, deletePropertyImage } from '../services/adminPropertyService';
 
 const emptyForm = {
   title: '',
@@ -31,9 +33,21 @@ const emptyForm = {
 };
 
 const statusOptions = ['Available', 'Reserved', 'Sold', 'For Rent'];
+const getPropertyId = (property) => property?._id || property?.id || property?.propertyId || property?.mongoId;
 
 function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All' }) {
   const properties = appData.properties || [];
+
+  const refreshProperties = async () => {
+    try {
+      const resp = await apiService.request('/admin/properties');
+      if (resp?.success) {
+        setAppData((prev) => ({ ...prev, properties: resp.data || prev.properties || [] }));
+      }
+    } catch (error) {
+      console.warn('Unable to refresh property list from backend:', error);
+    }
+  };
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState(defaultTypeFilter || 'All');
   const [statusFilter, setStatusFilter] = useState('All');
@@ -63,6 +77,21 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
     return next;
   }, [properties, search, typeFilter, statusFilter, sortKey]);
 
+  const inventoryStats = useMemo(() => {
+    const totalValue = properties.reduce((sum, item) => sum + Number(item.price || item.salePrice || 0), 0);
+    const available = properties.filter((item) => String(item.status || '').toLowerCase() === 'available').length;
+    const forRent = properties.filter((item) => String(item.status || '').toLowerCase() === 'for rent').length;
+    const reserved = properties.filter((item) => String(item.status || '').toLowerCase() === 'reserved').length;
+
+    return {
+      total: properties.length,
+      value: totalValue,
+      available,
+      forRent,
+      reserved,
+    };
+  }, [properties]);
+
   const openCreateModal = () => {
     setEditingId(null);
     setFormData(emptyForm);
@@ -70,8 +99,23 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
     setModalOpen(true);
   };
 
+  useEffect(() => {
+    const loadProperties = async () => {
+      try {
+        const existing = (appData.properties || []).length;
+        if (existing) return;
+        const resp = await apiService.request('/admin/properties');
+        if (resp?.success) setAppData((prev) => ({ ...prev, properties: resp.data || [] }));
+      } catch (e) {
+        console.warn('Load properties failed', e);
+        notify && notify({ message: 'Unable to load properties', variant: 'error' });
+      }
+    };
+    loadProperties();
+  }, [setAppData]);
+
   const openEditModal = (property) => {
-    setEditingId(property.id);
+    setEditingId(getPropertyId(property));
     setFormData({
       title: property.title || '',
       propertyType: property.propertyType || 'House',
@@ -136,7 +180,7 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
     }));
   };
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
     const nextErrors = validate();
     if (Object.keys(nextErrors).length) {
@@ -144,7 +188,7 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
       return;
     }
 
-    const previousProperty = editingId ? properties.find((item) => item.id === editingId) : null;
+    const previousProperty = editingId ? properties.find((item) => String(getPropertyId(item)) === String(editingId)) : null;
     const nextPriceHistory = previousProperty?.priceHistory || [];
 
     if (editingId && previousProperty) {
@@ -153,7 +197,7 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
       if (prevPrice !== nextPrice) {
         nextPriceHistory.unshift({
           historyId: `hist-${Date.now()}`,
-          propertyId: previousProperty.id,
+          propertyId: getPropertyId(previousProperty),
           oldPrice: prevPrice,
           newPrice: nextPrice,
           changedBy: 'Admin',
@@ -163,7 +207,6 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
     }
 
     const payload = {
-      id: editingId || generateId('prop'),
       title: formData.title.trim(),
       propertyType: formData.propertyType,
       category: formData.category || formData.propertyType,
@@ -193,97 +236,191 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
       priceHistory: nextPriceHistory,
     };
 
-    setAppData((prev) => {
-      const list = editingId ? prev.properties.map((item) => (item.id === editingId ? payload : item)) : [payload, ...(prev.properties || [])];
-      return { ...prev, properties: list };
-    });
+    try {
+      const saved = editingId
+        ? await updateAdminProperty(editingId, payload)
+        : await createAdminProperty(payload);
 
-    // create a notification for this property change/submission
-    setAppData((prev) => ({
-      ...prev,
-      notifications: [
-        {
-          id: `notif-${Date.now()}`,
-          title: editingId ? 'Property updated' : 'New property submission',
-          message: `${payload.title} (${payload.propertyType}) was ${editingId ? 'updated' : 'added'}.`,
-          propertyId: payload.id,
-          propertyType: payload.propertyType,
-          time: 'Just now',
-          date: new Date().toISOString(),
-          read: false,
-          priority: 'Normal',
-        },
-        ...(prev.notifications || []),
-      ],
-    }));
+      const finalProperty = saved || payload;
 
-    addActivity(editingId ? 'Property edited' : 'Property added', `${payload.title} was ${editingId ? 'updated' : 'added'} in the catalog.`);
-    notify({ message: editingId ? 'Property updated successfully.' : 'Property added successfully.', variant: 'success' });
-    setModalOpen(false);
-    setEditingId(null);
-    setFormData(emptyForm);
+      await refreshProperties();
+
+      setAppData((prev) => ({
+        ...prev,
+        notifications: [
+          {
+            id: `notif-${Date.now()}`,
+            title: editingId ? 'Property updated' : 'New property submission',
+            message: `${(finalProperty.title || payload.title)} (${finalProperty.propertyType || payload.propertyType}) was ${editingId ? 'updated' : 'added'}.`,
+            propertyId: getPropertyId(finalProperty) || editingId,
+            propertyType: finalProperty.propertyType || payload.propertyType,
+            time: 'Just now',
+            date: new Date().toISOString(),
+            read: false,
+            priority: 'Normal',
+          },
+          ...(prev.notifications || []),
+        ],
+      }));
+
+      addActivity(editingId ? 'Property edited' : 'Property added', `${finalProperty.title || payload.title} was ${editingId ? 'updated' : 'added'} in the catalog.`);
+      notify({ message: editingId ? 'Property updated successfully.' : 'Property added successfully.', variant: 'success' });
+      setModalOpen(false);
+      setEditingId(null);
+      setFormData(emptyForm);
+    } catch (error) {
+      console.error('Admin property save failed:', error);
+      notify({ message: error.message || 'Unable to save property.', variant: 'error' });
+    }
   };
 
-  const handleDelete = (propertyId) => {
-    setAppData((prev) => ({ ...prev, properties: (prev.properties || []).filter((item) => item.id !== propertyId) }));
-    addActivity('Property deleted', `A property was removed from the catalog.`);
-    notify({ message: 'Property deleted successfully.', variant: 'success' });
+  const handleDelete = async (propertyId) => {
+    try {
+      await deleteAdminProperty(propertyId);
+      await refreshProperties();
+      addActivity('Property deleted', 'A property was removed from the catalog.');
+      notify({ message: 'Property deleted successfully.', variant: 'success' });
+    } catch (error) {
+      console.error('Admin property delete failed:', error);
+      notify({ message: error.message || 'Unable to delete property.', variant: 'error' });
+    }
     setDeletingId(null);
   };
 
   const changeStatus = (propertyId, nextStatus) => {
-    setAppData((prev) => ({
-      ...prev,
-      properties: (prev.properties || []).map((item) => (item.id === propertyId ? { ...item, status: nextStatus, updatedAt: new Date().toISOString() } : item)),
-    }));
-    addActivity('Property status changed', `A property status was updated to ${nextStatus}.`);
-    notify({ message: `Property status updated to ${nextStatus}.`, variant: 'success' });
+    (async () => {
+      try {
+        notify({ message: 'Updating property status...', variant: 'info' });
+        const resp = await apiService.request(`/properties/${propertyId}/status`, { method: 'POST', body: { status: nextStatus } });
+        const updated = resp?.data || null;
+        if (updated) {
+          setAppData((prev) => ({ ...prev, properties: (prev.properties || []).map((p) => (String(getPropertyId(p)) === String(propertyId) ? { ...p, ...updated } : p)) }));
+        } else {
+          setAppData((prev) => ({ ...prev, properties: (prev.properties || []).map((item) => (String(getPropertyId(item)) === String(propertyId) ? { ...item, status: nextStatus, updatedAt: new Date().toISOString() } : item)) }));
+        }
+        await refreshProperties();
+        addActivity('Property status changed', `A property status was updated to ${nextStatus}.`);
+        notify({ message: `Property status updated to ${nextStatus}.`, variant: 'success' });
+      } catch (e) {
+        console.error('Update status failed', e);
+        notify({ message: e?.message || 'Unable to update property status.', variant: 'error' });
+      }
+    })();
   };
 
   const duplicateProperty = (property) => {
-    const duplicate = {
-      ...property,
-      id: generateId('prop'),
-      title: `${property.title} Copy`,
-      propertyType: property.propertyType || 'House',
-      category: property.category || property.propertyType || 'House',
-      status: property.status || 'Available',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      priceHistory: property.priceHistory || [],
-    };
+    (async () => {
+      try {
+        notify({ message: 'Duplicating property...', variant: 'info' });
+        const payload = { ...property };
+        delete payload._id;
+        delete payload.id;
+        payload.title = `${property.title} Copy`;
+        payload.createdAt = new Date().toISOString();
+        payload.updatedAt = new Date().toISOString();
+        const saved = await createAdminProperty(payload);
+        const finalProperty = saved || { ...payload, _id: payload._id || generateId('prop') };
+        await refreshProperties();
+        setEditingId(getPropertyId(finalProperty) || null);
+        setFormData({
+          title: finalProperty.title || '',
+          propertyType: finalProperty.propertyType || 'House',
+          category: finalProperty.category || finalProperty.propertyType || 'House',
+          description: finalProperty.description || '',
+          price: finalProperty.price || '',
+          rent: finalProperty.rent || '',
+          salePrice: finalProperty.salePrice || '',
+          deposit: finalProperty.deposit || '',
+          otherCharges: finalProperty.otherCharges || '',
+          location: finalProperty.location || '',
+          city: finalProperty.city || '',
+          address: finalProperty.address || '',
+          bedrooms: finalProperty.bedrooms || '',
+          bathrooms: finalProperty.bathrooms || '',
+          area: finalProperty.area || '',
+          furnished: finalProperty.furnished || 'Fully Furnished',
+          floor: finalProperty.floor || '',
+          totalFloors: finalProperty.totalFloors || '',
+          ownerName: finalProperty.ownerName || '',
+          ownerPhone: finalProperty.ownerPhone || '',
+          ownerEmail: finalProperty.ownerEmail || '',
+          image: finalProperty.image || '',
+          status: finalProperty.status || 'Available',
+        });
+        setErrors({});
+        setModalOpen(true);
+        addActivity('Property duplicated', `${property.title} was duplicated and opened for editing.`);
+        notify({ message: 'Property duplicated and opened for editing.', variant: 'success' });
+      } catch (e) {
+        console.error('Duplicate property failed', e);
+        notify({ message: e?.message || 'Unable to duplicate property.', variant: 'error' });
+      }
+    })();
+  };
 
-    setAppData((prev) => ({ ...prev, properties: [duplicate, ...(prev.properties || [])] }));
-    setEditingId(duplicate.id);
-    setFormData({
-      title: duplicate.title || '',
-      propertyType: duplicate.propertyType || 'House',
-      category: duplicate.category || duplicate.propertyType || 'House',
-      description: duplicate.description || '',
-      price: duplicate.price || '',
-      rent: duplicate.rent || '',
-      salePrice: duplicate.salePrice || '',
-      deposit: duplicate.deposit || '',
-      otherCharges: duplicate.otherCharges || '',
-      location: duplicate.location || '',
-      city: duplicate.city || '',
-      address: duplicate.address || '',
-      bedrooms: duplicate.bedrooms || '',
-      bathrooms: duplicate.bathrooms || '',
-      area: duplicate.area || '',
-      furnished: duplicate.furnished || 'Fully Furnished',
-      floor: duplicate.floor || '',
-      totalFloors: duplicate.totalFloors || '',
-      ownerName: duplicate.ownerName || '',
-      ownerPhone: duplicate.ownerPhone || '',
-      ownerEmail: duplicate.ownerEmail || '',
-      image: duplicate.image || '',
-      status: duplicate.status || 'Available',
-    });
-    setErrors({});
-    setModalOpen(true);
-    addActivity('Property duplicated', `${property.title} was duplicated and opened for editing.`);
-    notify({ message: 'Property duplicated and opened for editing.', variant: 'success' });
+  const handleUploadImageForSelected = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file || !selectedProperty) return;
+    try {
+      // client-side validation
+      const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+      const MAX_BYTES = Number(import.meta.env.VITE_UPLOAD_MAX_SIZE || 5 * 1024 * 1024);
+      if (!allowedTypes.includes(file.type)) {
+        notify({ message: 'Invalid image type. Only JPG, PNG and WEBP are allowed.', variant: 'error' });
+        return;
+      }
+      if (file.size && file.size > MAX_BYTES) {
+        notify({ message: `Image too large. Maximum ${Math.round(MAX_BYTES / 1024 / 1024)}MB allowed.`, variant: 'error' });
+        return;
+      }
+
+      notify({ message: 'Uploading image...', variant: 'info' });
+      const result = await uploadPropertyImage(getPropertyId(selectedProperty), file);
+      const updatedImages = result?.images || (result?.url ? [result.url, ...(selectedProperty.images || [])] : selectedProperty.images || []);
+      const updated = { ...selectedProperty, images: updatedImages, image: updatedImages[0] || selectedProperty.image };
+      await updateAdminProperty(getPropertyId(updated), { images: updatedImages, image: updated.image });
+      await refreshProperties();
+      setSelectedProperty(updated);
+      notify({ message: 'Image uploaded.', variant: 'success' });
+    } catch (e) {
+      console.error('Upload failed', e);
+      notify({ message: e.message || 'Image upload failed.', variant: 'error' });
+    }
+  };
+
+  const handleDeleteImageForSelected = async (index) => {
+    if (!selectedProperty) return;
+    try {
+      notify({ message: 'Deleting image...', variant: 'info' });
+      await deletePropertyImage(getPropertyId(selectedProperty), index);
+      const nextImages = (selectedProperty.images || []).filter((_, i) => i !== index);
+      const updated = { ...selectedProperty, images: nextImages, image: nextImages[0] || '' };
+      await updateAdminProperty(getPropertyId(updated), { images: updated.images, image: updated.image });
+      await refreshProperties();
+      setSelectedProperty(updated);
+      notify({ message: 'Image deleted.', variant: 'success' });
+    } catch (e) {
+      console.error('Delete image failed', e);
+      notify({ message: e.message || 'Unable to delete image.', variant: 'error' });
+    }
+  };
+
+  const moveImage = async (fromIndex, toIndex) => {
+    if (!selectedProperty) return;
+    const images = Array.isArray(selectedProperty.images) ? [...selectedProperty.images] : (selectedProperty.image ? [selectedProperty.image] : []);
+    if (fromIndex < 0 || fromIndex >= images.length || toIndex < 0 || toIndex >= images.length) return;
+    const item = images.splice(fromIndex, 1)[0];
+    images.splice(toIndex, 0, item);
+    const updated = { ...selectedProperty, images, image: images[0] || '' };
+    try {
+      await updateAdminProperty(getPropertyId(updated), { images: updated.images, image: updated.image });
+      await refreshProperties();
+      setSelectedProperty(updated);
+      notify({ message: 'Image order updated.', variant: 'success' });
+    } catch (e) {
+      console.error('Reorder failed', e);
+      notify({ message: e.message || 'Unable to reorder images.', variant: 'error' });
+    }
   };
 
   const paymentHistory = (appData.payments || []).filter((payment) => (payment.propertyName || payment.property) === (selectedProperty?.title || ''));
@@ -291,6 +428,25 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
 
   return (
     <div className="page-section properties-page">
+      <div className="summary-strip inventory-strip">
+        <div className="summary-item primary">
+          <span>Total inventory</span>
+          <strong>{inventoryStats.total}</strong>
+        </div>
+        <div className="summary-item success">
+          <span>Available now</span>
+          <strong>{inventoryStats.available}</strong>
+        </div>
+        <div className="summary-item danger">
+          <span>For rent</span>
+          <strong>{inventoryStats.forRent}</strong>
+        </div>
+        <div className="summary-item info">
+          <span>Portfolio value</span>
+          <strong>{formatCurrency(inventoryStats.value)}</strong>
+        </div>
+      </div>
+
       <section className="panel-card toolbar-card">
         <div className="toolbar-row">
           <div className="toolbar-search">
@@ -349,7 +505,7 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
               </thead>
               <tbody>
                 {filteredProperties.map((property) => (
-                  <tr key={property.id}>
+                  <tr key={getPropertyId(property) || property.id}>
                     <td>
                       <img src={property.image || 'https://images.unsplash.com/photo-1568605114967-8130f3a36994?auto=format&fit=crop&w=300&q=80'} alt={property.title} className="property-thumb" />
                     </td>
@@ -362,7 +518,7 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
                     <td>{formatCurrency(property.price || property.salePrice || 0)}</td>
                     <td>{property.ownerName}</td>
                     <td>
-                      <select value={property.status} onChange={(event) => changeStatus(property.id, event.target.value)} className="status-select">
+                      <select value={property.status} onChange={(event) => changeStatus(getPropertyId(property), event.target.value)} className="status-select">
                         {statusOptions.map((status) => (
                           <option key={status} value={status}>{status}</option>
                         ))}
@@ -374,7 +530,7 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
                         <button type="button" className="table-button light" onClick={() => openEditModal(property)}>Edit</button>
                         <button type="button" className="table-button light" onClick={() => { setSelectedProperty(property); setManageModalOpen(true); }}>Manage</button>
                         <button type="button" className="table-button light" onClick={() => duplicateProperty(property)}>Copy & Edit</button>
-                        <button type="button" className="table-button danger" onClick={() => setDeletingId(property.id)}>Delete</button>
+                        <button type="button" className="table-button danger" onClick={() => setDeletingId(getPropertyId(property))}>Delete</button>
                       </div>
                     </td>
                   </tr>
@@ -602,6 +758,27 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
                   ))}
                 </ul>
               ) : <p>No due history reported.</p>}
+            </div>
+
+            <div className="subsection-block">
+              <h5>Images</h5>
+              <p>Upload, preview, delete or reorder property images.</p>
+              <label className="file-label">
+                Add image
+                <input type="file" accept="image/*" onChange={handleUploadImageForSelected} />
+              </label>
+              <div className="images-list">
+                {(selectedProperty.images || (selectedProperty.image ? [selectedProperty.image] : [])).map((img, idx) => (
+                  <div className="image-item" key={`${String(selectedProperty.id||selectedProperty._id)}-${idx}`}>
+                    <img src={img} alt={`img-${idx}`} />
+                    <div className="image-controls">
+                      <button type="button" className="small" onClick={() => moveImage(idx, Math.max(0, idx - 1))} disabled={idx === 0}>←</button>
+                      <button type="button" className="small" onClick={() => moveImage(idx, idx + 1)} disabled={idx === ((selectedProperty.images || []).length - 1)}>→</button>
+                      <button type="button" className="small danger" onClick={() => handleDeleteImageForSelected(idx)}>Delete</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         )}

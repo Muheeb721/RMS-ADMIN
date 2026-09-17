@@ -1,8 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import './UsersPage.css';
 import Modal from '../components/Modal';
 import { formatDate } from '../utils/formatters';
 import { generateId } from '../services/localStorage';
+import { apiService } from '../services/api';
 
 const emptyForm = {
   fullName: '',
@@ -10,10 +12,13 @@ const emptyForm = {
   phone: '',
   role: 'Tenant',
   status: 'Active',
+  password: '',
 };
 
 function UsersPage({ appData, setAppData, notify }) {
   const users = appData.users || [];
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
   const [roleFilter, setRoleFilter] = useState('All');
@@ -23,6 +28,7 @@ function UsersPage({ appData, setAppData, notify }) {
   const [formData, setFormData] = useState(emptyForm);
   const [errors, setErrors] = useState({});
   const [deletingId, setDeletingId] = useState(null);
+  const [saving, setSaving] = useState(false);
 
   const filteredUsers = useMemo(() => {
     const next = [...users].filter((user) => {
@@ -40,6 +46,18 @@ function UsersPage({ appData, setAppData, notify }) {
 
     return next;
   }, [users, search, statusFilter, roleFilter, sortBy]);
+
+  const userStats = useMemo(() => {
+    const counts = users.reduce((acc, user) => {
+      acc.total += 1;
+      acc.active += String(user.status || '').toLowerCase() === 'active' ? 1 : 0;
+      acc.pending += String(user.status || '').toLowerCase() === 'pending' ? 1 : 0;
+      acc.tenants += String(user.role || '').toLowerCase() === 'tenant' ? 1 : 0;
+      return acc;
+    }, { total: 0, active: 0, pending: 0, tenants: 0 });
+
+    return counts;
+  }, [users]);
 
   const addActivity = (action, details) => {
     setAppData((prev) => ({
@@ -63,8 +81,42 @@ function UsersPage({ appData, setAppData, notify }) {
     setModalOpen(true);
   };
 
+  useEffect(() => {
+    const loadUsers = async () => {
+      try {
+        setLoading(true);
+        const resp = await apiService.request('/admin/users');
+        if (resp?.success) {
+          const nextUsers = Array.isArray(resp.data) ? resp.data : [];
+          setAppData((prev) => ({
+            ...prev,
+            users: nextUsers,
+            tenants: nextUsers.map((user, index) => ({
+              id: user._id || user.id || `tenant-${index + 1}`,
+              _id: user._id || user.id || `tenant-${index + 1}`,
+              fullName: user.fullName || user.name || 'Unknown Tenant',
+              name: user.name || user.fullName || 'Unknown Tenant',
+              email: user.email || '',
+              phone: user.phone || '',
+              status: user.status || 'Active',
+              propertyName: user.propertyName || user.property || '',
+              propertyId: user.propertyId || '',
+              createdAt: user.createdAt || new Date().toISOString(),
+            })),
+          }));
+        }
+      } catch (e) {
+        console.warn('Unable to load users', e?.message || e);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadUsers();
+  }, [setAppData]);
+
   const openEditModal = (user) => {
-    setEditingId(user.id);
+    setEditingId(user._id || user.id);
     setFormData({
       fullName: user.fullName || user.name,
       email: user.email,
@@ -76,7 +128,7 @@ function UsersPage({ appData, setAppData, notify }) {
     setModalOpen(true);
   };
 
-  const saveUser = (event) => {
+  const saveUser = async (event) => {
     event.preventDefault();
     const nextErrors = validate();
     if (Object.keys(nextErrors).length) {
@@ -85,45 +137,144 @@ function UsersPage({ appData, setAppData, notify }) {
     }
 
     const payload = {
-      id: editingId || generateId('usr'),
-      fullName: formData.fullName.trim(),
       name: formData.fullName.trim(),
       email: formData.email.trim(),
       phone: formData.phone.trim(),
       role: formData.role,
       status: formData.status,
-      registrationDate: editingId ? (users.find((item) => item.id === editingId)?.registrationDate || new Date().toISOString().slice(0, 10)) : new Date().toISOString().slice(0, 10),
-      lastActivity: new Date().toISOString(),
+      profile: {},
     };
 
-    setAppData((prev) => ({
-      ...prev,
-      users: editingId ? (prev.users || []).map((item) => (item.id === editingId ? payload : item)) : [payload, ...(prev.users || [])],
-    }));
-    addActivity(editingId ? 'User edited' : 'User added', `${payload.fullName} was ${editingId ? 'updated' : 'added'} to the roster.`);
-    notify({ message: editingId ? 'User updated successfully.' : 'User created successfully.', variant: 'success' });
-    setModalOpen(false);
-    setEditingId(null);
-    setFormData(emptyForm);
+    try {
+      setSaving(true);
+      if (!editingId) {
+        if (!formData.password) {
+          setErrors({ password: 'Password is required for new users' });
+          return;
+        }
+        payload.password = formData.password;
+        const resp = await apiService.request('/admin/users', { method: 'POST', body: payload });
+        if (resp?.success) {
+          const nextUser = resp.data;
+          setAppData((prev) => ({
+            ...prev,
+            users: [nextUser, ...(prev.users || [])],
+            tenants: [
+              {
+                id: nextUser._id || nextUser.id,
+                _id: nextUser._id || nextUser.id,
+                fullName: nextUser.fullName || nextUser.name || 'Unknown Tenant',
+                name: nextUser.name || nextUser.fullName || 'Unknown Tenant',
+                email: nextUser.email || '',
+                phone: nextUser.phone || '',
+                status: nextUser.status || 'Active',
+                propertyName: nextUser.propertyName || nextUser.property || '',
+                propertyId: nextUser.propertyId || '',
+                createdAt: nextUser.createdAt || new Date().toISOString(),
+              },
+              ...(prev.tenants || []),
+            ],
+          }));
+          addActivity('User added', `${nextUser.name || nextUser.fullName} was added by admin.`);
+          notify({ message: 'User created successfully.', variant: 'success' });
+        }
+      } else {
+        const resp = await apiService.request(`/admin/users/${editingId}`, { method: 'PUT', body: payload });
+        if (resp?.success) {
+          const updatedUser = resp.data;
+          setAppData((prev) => ({
+            ...prev,
+            users: (prev.users || []).map((u) => (String(u._id || u.id) === String(editingId) ? updatedUser : u)),
+            tenants: (prev.tenants || []).map((u) => (String(u._id || u.id) === String(editingId)
+              ? {
+                  ...u,
+                  id: updatedUser._id || updatedUser.id || u.id,
+                  _id: updatedUser._id || updatedUser.id || u._id,
+                  fullName: updatedUser.fullName || updatedUser.name || u.fullName || u.name,
+                  name: updatedUser.name || updatedUser.fullName || u.name || u.fullName,
+                  email: updatedUser.email || u.email,
+                  phone: updatedUser.phone || u.phone,
+                  status: updatedUser.status || u.status,
+                }
+              : u)),
+          }));
+          addActivity('User edited', `${updatedUser.name || updatedUser.fullName} was updated by admin.`);
+          notify({ message: 'User updated successfully.', variant: 'success' });
+        }
+      }
+
+      setModalOpen(false);
+      setEditingId(null);
+      setFormData(emptyForm);
+    } catch (e) {
+      console.error('Save user failed', e);
+      notify({ message: e?.message || 'Unable to save user.', variant: 'error' });
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const deleteUser = (userId) => {
-    setAppData((prev) => ({ ...prev, users: (prev.users || []).filter((item) => item.id !== userId) }));
-    addActivity('User deleted', 'A user was removed from the admin list.');
-    notify({ message: 'User deleted successfully.', variant: 'success' });
-    setDeletingId(null);
+  const deleteUser = async (userId) => {
+    try {
+      const resp = await apiService.request(`/admin/users/${userId}`, { method: 'DELETE' });
+      if (resp?.success) {
+        setAppData((prev) => ({
+          ...prev,
+          users: (prev.users || []).filter((u) => String(u._id || u.id) !== String(userId)),
+          tenants: (prev.tenants || []).filter((u) => String(u._id || u.id) !== String(userId)),
+        }));
+        addActivity('User archived', `User ${userId} archived by admin.`);
+        notify({ message: 'User archived successfully.', variant: 'success' });
+      }
+    } catch (e) {
+      console.error('Delete user failed', e);
+      notify({ message: e?.message || 'Unable to archive user.', variant: 'error' });
+    } finally {
+      setDeletingId(null);
+    }
   };
 
-  const toggleStatus = (userId, nextStatus) => {
-    setAppData((prev) => ({
-      ...prev,
-      users: (prev.users || []).map((item) => (item.id === userId ? { ...item, status: nextStatus, lastActivity: new Date().toISOString() } : item)),
-    }));
-    notify({ message: `User status updated to ${nextStatus}.`, variant: 'success' });
+  const toggleStatus = async (userId, nextStatus) => {
+    try {
+      const resp = await apiService.request(`/admin/users/${userId}`, { method: 'PUT', body: { status: nextStatus } });
+      if (resp?.success) {
+        const updatedUser = resp.data;
+        setAppData((prev) => ({
+          ...prev,
+          users: (prev.users || []).map((u) => (String(u._id || u.id) === String(userId) ? updatedUser : u)),
+          tenants: (prev.tenants || []).map((u) => (String(u._id || u.id) === String(userId)
+            ? { ...u, status: updatedUser.status || u.status, fullName: updatedUser.fullName || updatedUser.name || u.fullName || u.name }
+            : u)),
+        }));
+        notify({ message: `User status updated to ${nextStatus}.`, variant: 'success' });
+      }
+    } catch (e) {
+      console.error('Toggle status failed', e);
+      notify({ message: e?.message || 'Unable to update status.', variant: 'error' });
+    }
   };
 
   return (
     <div className="page-section users-page">
+      <div className="summary-strip user-strip">
+        <div className="summary-item primary">
+          <span>Total users</span>
+          <strong>{userStats.total}</strong>
+        </div>
+        <div className="summary-item success">
+          <span>Active</span>
+          <strong>{userStats.active}</strong>
+        </div>
+        <div className="summary-item danger">
+          <span>Pending</span>
+          <strong>{userStats.pending}</strong>
+        </div>
+        <div className="summary-item info">
+          <span>Tenants</span>
+          <strong>{userStats.tenants}</strong>
+        </div>
+      </div>
+
       <section className="panel-card toolbar-card">
         <div className="toolbar-row">
           <div className="toolbar-search">
@@ -183,14 +334,14 @@ function UsersPage({ appData, setAppData, notify }) {
               </thead>
               <tbody>
                 {filteredUsers.map((user) => (
-                  <tr key={user.id}>
-                    <td>{user.id}</td>
+                  <tr key={user._id || user.id}>
+                    <td>{user._id || user.id}</td>
                     <td>{user.fullName || user.name}</td>
                     <td>{user.email}</td>
                     <td>{user.phone || '—'}</td>
                     <td>{user.role}</td>
                     <td>
-                      <select value={user.status} onChange={(event) => toggleStatus(user.id, event.target.value)} className="status-select">
+                      <select value={user.status} onChange={(event) => toggleStatus(user._id || user.id, event.target.value)} className="status-select">
                         <option value="Active">Active</option>
                         <option value="Inactive">Inactive</option>
                         <option value="Pending">Pending</option>
@@ -200,8 +351,9 @@ function UsersPage({ appData, setAppData, notify }) {
                     <td>{formatDate(user.lastActivity)}</td>
                     <td>
                       <div className="table-actions">
+                        <button type="button" className="table-button light" onClick={() => navigate(`/admin/tenant-profile/${encodeURIComponent(user._id || user.id || user.fullName || user.name)}`)}>Profile</button>
                         <button type="button" className="table-button light" onClick={() => openEditModal(user)}>Edit</button>
-                        <button type="button" className="table-button danger" onClick={() => setDeletingId(user.id)}>Delete</button>
+                        <button type="button" className="table-button danger" onClick={() => setDeletingId(user._id || user.id)}>Delete</button>
                       </div>
                     </td>
                   </tr>
@@ -219,7 +371,7 @@ function UsersPage({ appData, setAppData, notify }) {
         footer={
           <>
             <button type="button" className="outline-button" onClick={() => setModalOpen(false)}>Cancel</button>
-            <button type="submit" className="primary-button" form="user-form">Save User</button>
+            <button type="submit" className="primary-button" form="user-form" disabled={saving}>{saving ? 'Saving...' : 'Save User'}</button>
           </>
         }
       >
@@ -234,6 +386,13 @@ function UsersPage({ appData, setAppData, notify }) {
             <input type="email" value={formData.email} onChange={(event) => setFormData((prev) => ({ ...prev, email: event.target.value }))} />
             {errors.email && <span className="field-error">{errors.email}</span>}
           </label>
+          {!editingId && (
+            <label>
+              Password
+              <input type="password" value={formData.password} onChange={(event) => setFormData((prev) => ({ ...prev, password: event.target.value }))} />
+              {errors.password && <span className="field-error">{errors.password}</span>}
+            </label>
+          )}
           <label>
             Phone
             <input value={formData.phone} onChange={(event) => setFormData((prev) => ({ ...prev, phone: event.target.value }))} />

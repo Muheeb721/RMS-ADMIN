@@ -70,10 +70,10 @@ export const defaultState = {
     { id: 3, question: 'How can I contact admin?', answer: 'Use the support page or the chat widget from your account dashboard.', language: 'English', enabled: false },
   ],
   apiConfig: {
-    baseUrl: 'https://api.rms.local/v1',
-    token: 'demo-admin-token',
-    timeout: 12000,
-    mode: 'Production',
+    baseUrl: (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, ''),
+    token: import.meta.env.VITE_API_TOKEN || '',
+    timeout: Number(import.meta.env.VITE_API_TIMEOUT || 12000),
+    mode: import.meta.env.VITE_APP_MODE || 'Production',
   },
   settings: {
     darkMode: true,

@@ -5,6 +5,8 @@ import Toast from './components/Toast';
 import AdminLayout from './components/AdminLayout';
 import LoginPage from './pages/LoginPage';
 import { clearAllAppStorage, clearAuthState, loadAppData, loadAuthState, persistAppData, saveLoginCredentials, setAuthState } from './services/localStorage';
+import { clearAdminAuthToken, login as loginAdmin } from './services/adminAuth';
+import { apiService } from './services/api';
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(loadAuthState);
@@ -25,11 +27,75 @@ function App() {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
-  const handleLogin = (email, password) => {
-    if (email && password && email.includes('@') && password.length >= 4) {
+  useEffect(() => {
+    if (!isAuthenticated) return undefined;
+
+    const loadDashboardData = async () => {
+      try {
+        const response = await apiService.request('/admin/dashboard');
+        if (!response?.success || !response?.data) return;
+
+        const dashboardUsers = response.data.users || [];
+        const dashboardTenants = Array.isArray(response.data.tenants) && response.data.tenants.length
+          ? response.data.tenants
+          : dashboardUsers.map((user, index) => ({
+              id: user._id || user.id || `tenant-${index + 1}`,
+              _id: user._id || user.id || `tenant-${index + 1}`,
+              fullName: user.fullName || user.name || 'Unknown Tenant',
+              name: user.name || user.fullName || 'Unknown Tenant',
+              email: user.email || '',
+              phone: user.phone || '',
+              status: user.status || 'Active',
+              propertyName: user.propertyName || '',
+              propertyId: user.propertyId || '',
+              createdAt: user.createdAt || new Date().toISOString(),
+            }));
+
+        setAppData((prev) => ({
+          ...prev,
+          ...response.data,
+          properties: response.data.properties || prev.properties || [],
+          users: dashboardUsers,
+          tenants: dashboardTenants,
+          bookings: response.data.bookings || prev.bookings || [],
+          payments: response.data.payments || prev.payments || [],
+          rentRecords: response.data.rentRecords || prev.rentRecords || [],
+          dues: response.data.dues || prev.dues || [],
+          maintenanceItems: response.data.maintenanceItems || prev.maintenanceItems || [],
+          notifications: response.data.notifications || prev.notifications || [],
+          activityLogs: response.data.activity || prev.activityLogs || [],
+          dashboardSummary: response.data.summary || prev.dashboardSummary || {},
+        }));
+      } catch (error) {
+        console.warn('Unable to sync admin dashboard from backend:', error);
+      }
+    };
+
+    loadDashboardData();
+    return undefined;
+  }, [isAuthenticated]);
+
+  const handleLogin = async (email, password) => {
+    try {
+      const result = await loginAdmin(email, password);
+      if (!result?.success) {
+        setToast({ message: result?.message || 'Admin login failed.', variant: 'error' });
+        return false;
+      }
+
+      // If backend returned user/profile data, merge it into app state
+      if (result?.data?.user) {
+        const userData = result.data.user;
+        setAppData((prev) => ({
+          ...prev,
+          profile: { ...prev.profile, ...userData },
+          admin: { ...prev.admin, ...userData },
+        }));
+      }
+
       const loginNotification = {
         id: `notif-${Date.now()}`,
-        title: 'User logged in',
+        title: 'Admin logged in',
         message: `${email} signed in to the admin portal.`,
         detail: `Login by ${email}. Role: Administrator.`,
         type: 'Login',
@@ -50,13 +116,16 @@ function App() {
       setIsAuthenticated(true);
       setToast({ message: 'Welcome back, Admin 👋', variant: 'success' });
       return true;
+    } catch (error) {
+      setToast({ message: error.message || 'Admin login failed.', variant: 'error' });
+      return false;
     }
-    return false;
   };
 
   const handleLogout = () => {
     clearAllAppStorage();
     clearAuthState();
+    clearAdminAuthToken();
     setIsAuthenticated(false);
     setToast({ message: 'Logged out successfully.', variant: 'info' });
   };

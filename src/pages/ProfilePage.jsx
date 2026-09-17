@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { apiService } from '../services/api';
 import { useNavigate } from 'react-router-dom';
 import './ProfilePage.css';
 
@@ -59,37 +60,96 @@ function ProfilePage({ appData, setAppData, notify }) {
       role: (form.role || '').trim(),
     };
 
-    const nextProfile = {
-      ...defaultProfile,
-      ...cleanedForm,
-      fullName: cleanedForm.fullName || cleanedForm.name || defaultProfile.fullName,
-      name: cleanedForm.name || cleanedForm.fullName || defaultProfile.name,
-    };
+    // attempt to persist profile update via backend API if admin id exists
+    (async () => {
+      const savedProfile = appData.profile || appData.admin || defaultProfile;
+      const userId = savedProfile?.id || savedProfile?._id || savedProfile?.userId;
 
-    const profileNotification = {
-      id: `notif-${Date.now()}`,
-      title: 'Profile updated',
-      message: `${nextProfile.fullName} updated the admin profile.`,
-      detail: `Name: ${nextProfile.fullName} | Email: ${nextProfile.email} | Phone: ${nextProfile.phone} | Role: ${nextProfile.role}`,
-      type: 'Profile',
-      recipient: nextProfile.email || 'Admin',
-      date: new Date().toISOString(),
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      read: false,
-      priority: 'High',
-    };
+      const payload = {
+        name: cleanedForm.name || cleanedForm.fullName,
+        fullName: cleanedForm.fullName || cleanedForm.name,
+        email: cleanedForm.email,
+        phone: cleanedForm.phone,
+        role: cleanedForm.role,
+        profile: {
+          name: cleanedForm.name || cleanedForm.fullName,
+          email: cleanedForm.email,
+          phone: cleanedForm.phone,
+        },
+      };
 
-    setAppData((prev) => ({
-      ...prev,
-      admin: { ...(prev.admin || {}), ...nextProfile },
-      profile: nextProfile,
-      notifications: [profileNotification, ...(prev.notifications || [])],
-    }));
+      if (userId) {
+        try {
+          const resp = await apiService.request(`/admin/users/${userId}`, { method: 'PUT', body: payload });
+          const updated = resp?.data || {};
+          setAppData((prev) => ({
+            ...prev,
+            admin: { ...(prev.admin || {}), ...updated },
+            profile: { ...(prev.profile || {}), ...updated },
+            notifications: [
+              {
+                id: `notif-${Date.now()}`,
+                title: 'Profile updated',
+                message: `${updated.name || updated.fullName || cleanedForm.name} updated the admin profile.`,
+                detail: `Name: ${updated.name || updated.fullName} | Email: ${updated.email} | Phone: ${updated.phone} | Role: ${updated.role}`,
+                type: 'Profile',
+                recipient: updated.email || 'Admin',
+                date: new Date().toISOString(),
+                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                read: false,
+                priority: 'High',
+              },
+              ...(prev.notifications || []),
+            ],
+          }));
 
-    setForm(emptyProfile());
-    setShowConfirm(false);
-    notify({ message: 'Profile updated successfully.', variant: 'success' });
-    navigate('/admin');
+          setForm(emptyProfile());
+          setShowConfirm(false);
+          notify({ message: 'Profile updated successfully.', variant: 'success' });
+          navigate('/admin');
+          return;
+        } catch (error) {
+          console.error('Profile update failed', error);
+          notify({ message: error.message || 'Unable to update profile on server.', variant: 'error' });
+          setShowConfirm(false);
+          return;
+        }
+      }
+
+      // fallback to local update if no userId present
+      const nextProfile = {
+        ...defaultProfile,
+        ...cleanedForm,
+        fullName: cleanedForm.fullName || cleanedForm.name || defaultProfile.fullName,
+        name: cleanedForm.name || cleanedForm.fullName || defaultProfile.name,
+      };
+
+      setAppData((prev) => ({
+        ...prev,
+        admin: { ...(prev.admin || {}), ...nextProfile },
+        profile: nextProfile,
+        notifications: [
+          {
+            id: `notif-${Date.now()}`,
+            title: 'Profile updated',
+            message: `${nextProfile.fullName} updated the admin profile.`,
+            detail: `Name: ${nextProfile.fullName} | Email: ${nextProfile.email} | Phone: ${nextProfile.phone} | Role: ${nextProfile.role}`,
+            type: 'Profile',
+            recipient: nextProfile.email || 'Admin',
+            date: new Date().toISOString(),
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            read: false,
+            priority: 'High',
+          },
+          ...(prev.notifications || []),
+        ],
+      }));
+
+      setForm(emptyProfile());
+      setShowConfirm(false);
+      notify({ message: 'Profile updated locally.', variant: 'success' });
+      navigate('/admin');
+    })();
   };
 
   return (

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import './LoginPage.css';
 
 function LoginPage({ onLogin }) {
@@ -6,14 +7,20 @@ function LoginPage({ onLogin }) {
   const [password, setPassword] = useState('admin123');
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
-    const success = onLogin(email, password);
+    setError('');
+    const success = await onLogin(email, password);
     if (!success) {
       setError('Please enter a valid admin email and password.');
+      return;
     }
+
+    // navigate to home (root) after successful login
+    navigate('/', { replace: true });
   };
+
+  const navigate = useNavigate();
 
   return (
     <div className="login-shell login-page">

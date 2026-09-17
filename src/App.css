@@ -15,6 +15,33 @@ textarea {
 
 button {
   cursor: pointer;
+  color: #000000;
+}
+
+button span,
+button strong,
+button b,
+button em,
+button i {
+  color: #000000;
+}
+
+button:disabled {
+  color: #000000;
+  opacity: 0.72;
+}
+
+.primary-button,
+.outline-button,
+.mini-button,
+.table-button,
+.header-icon-button,
+.add-button,
+.action-button,
+.icon-button,
+.filter-button,
+.status-button {
+  color: #000000;
 }
 
 .primary-button,
@@ -36,21 +63,21 @@ button {
 
 .primary-button {
   background: linear-gradient(135deg, #0f172a, #1d4ed8);
-  color: #ffffff;
+  color: #000000;
   padding: 12px 18px;
   box-shadow: 0 14px 28px rgba(29, 78, 216, 0.22);
 }
 
 .outline-button {
   background: rgba(15, 23, 42, 0.08);
-  color: #0f172a;
+  color: #000000;
   border: 1px solid rgba(15, 23, 42, 0.12);
   padding: 10px 14px;
 }
 
 .mini-button {
   background: linear-gradient(135deg, #0f172a, #1d4ed8);
-  color: #ffffff;
+  color: #000000;
   padding: 8px 12px;
   font-size: 0.82rem;
   border: 1px solid rgba(29, 78, 216, 0.18);
@@ -64,13 +91,13 @@ button {
 
 .table-button.light {
   background: linear-gradient(135deg, #1d4ed8, #1e3a8a);
-  color: #ffffff;
+  color:black;
   border-color: rgba(30, 58, 138, 0.2);
 }
 
 .table-button.danger {
   background: linear-gradient(135deg, #b91c1c, #7f1d1d);
-  color: #ffffff;
+  color: #0e0c0c;
   border-color: rgba(127, 29, 29, 0.2);
 }
 
@@ -593,12 +620,66 @@ td {
 
 @media (max-width: 560px) {
   .content-area {
-    padding: 16px;
+    padding: 16px 12px 20px;
+  }
+
+  .topbar {
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .topbar h2 {
+    font-size: 1.35rem;
+  }
+
+  .topbar-actions {
+    gap: 8px;
+    justify-content: space-between;
+  }
+
+  .search-box {
+    min-width: 0;
+    flex: 1 1 100%;
+    width: 100%;
   }
 
   .stats-grid,
-  .stats-grid.three-column {
+  .stats-grid.three-column,
+  .content-grid.two-column {
     grid-template-columns: 1fr;
+  }
+
+  .panel-card,
+  .stat-card {
+    padding: 14px 12px;
+  }
+
+  .card-header,
+  .review-header,
+  .setting-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .list-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .inline-actions,
+  .chatbot-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  table {
+    min-width: 520px;
+  }
+
+  th,
+  td {
+    padding: 8px 6px;
+    font-size: 0.76rem;
   }
 
   .sidebar {

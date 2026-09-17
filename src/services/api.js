@@ -1,8 +1,10 @@
+import { getAdminAuthToken, clearAdminAuthToken } from './adminAuth';
+
 export const apiConfig = {
   appName: import.meta.env.VITE_APP_NAME || 'RMS Admin',
-  baseUrl: import.meta.env.VITE_API_BASE_URL || 'https://api.rms.local/v1',
-  token: import.meta.env.VITE_API_TOKEN || 'demo-admin-token',
-  socketUrl: import.meta.env.VITE_SOCKET_URL || 'wss://socket.rms.local',
+  baseUrl: (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, ''),
+  token: import.meta.env.VITE_API_TOKEN || '',
+  socketUrl: import.meta.env.VITE_SOCKET_URL || '',
   endpoints: {
     properties: '/properties',
     users: '/users',
@@ -13,31 +15,67 @@ export const apiConfig = {
     chatbot: '/chatbot',
     analytics: '/analytics',
   },
-}
+};
 
 export const apiService = {
   getConfig: () => ({ ...apiConfig }),
   request: async (endpoint, options = {}) => {
+    const isAbsoluteUrl = /^https?:\/\//i.test(endpoint);
+    const url = isAbsoluteUrl ? endpoint : `${apiConfig.baseUrl}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
+    const token = getAdminAuthToken();
+    const requestHeaders = new Headers(options.headers || {});
+
+    requestHeaders.set('Accept', 'application/json');
+    if (token) {
+      requestHeaders.set('Authorization', `Bearer ${token}`);
+    }
+
+    if (!(options.body instanceof FormData) && !requestHeaders.has('Content-Type')) {
+      requestHeaders.set('Content-Type', 'application/json');
+    }
+
     const config = {
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        Authorization: `Bearer ${apiConfig.token}`,
-      },
       ...options,
+      headers: requestHeaders,
+    };
+
+    if (config.body && typeof config.body !== 'string' && !(config.body instanceof FormData)) {
+      config.body = JSON.stringify(config.body);
     }
 
-    try {
-      const response = await fetch(`${apiConfig.baseUrl}${endpoint}`, config)
-
-      if (!response.ok) {
-        throw new Error(`Request failed: ${response.status}`)
+    const response = await fetch(url, config);
+    // if unauthorized, clear stored token so UI can re-authenticate
+    if (response.status === 401) {
+      try {
+        clearAdminAuthToken();
+      } catch (e) {
+        // ignore
       }
-
-      return await response.json()
-    } catch (error) {
-      console.warn(`API request to ${endpoint} failed. Using local fallback.`, error)
-      return { success: true, data: [] }
+      throw new Error('Unauthorized');
     }
+
+    const json = await response.json().catch(() => ({ success: false, message: 'Invalid backend response.' }));
+
+    if (!response.ok) {
+      throw new Error(json?.message || `Request failed: ${response.status}`);
+    }
+
+    return json;
   },
-}
+};
+
+// Convenience helpers for common admin operations
+apiService.getProperties = async (query = '') => apiService.request(`${apiConfig.endpoints.properties}${query ? `?${query}` : ''}`, { method: 'GET' });
+apiService.getProperty = async (id) => apiService.request(`${apiConfig.endpoints.properties}/${id}`, { method: 'GET' });
+apiService.createProperty = async (data) => apiService.request(`${apiConfig.endpoints.properties}`, { method: 'POST', body: data });
+apiService.updateProperty = async (id, data) => apiService.request(`${apiConfig.endpoints.properties}/${id}`, { method: 'PUT', body: data });
+apiService.deleteProperty = async (id) => apiService.request(`${apiConfig.endpoints.properties}/${id}`, { method: 'DELETE' });
+
+// Image management helpers (expects FormData for uploads)
+apiService.uploadPropertyImage = async (id, formData) => apiService.request(`${apiConfig.endpoints.properties}/${id}/images`, { method: 'POST', body: formData });
+apiService.replacePropertyImage = async (id, imageIndex, formData) => apiService.request(`${apiConfig.endpoints.properties}/${id}/images/${imageIndex}`, { method: 'POST', body: formData });
+apiService.deletePropertyImage = async (id, imageIndex) => apiService.request(`${apiConfig.endpoints.properties}/${id}/images/${imageIndex}`, { method: 'DELETE' });
+
+apiService.getAdminDashboard = async () => apiService.request('/admin/dashboard', { method: 'GET' });
+
+export default apiService;
