@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import './AdminHomePage.css';
 import Modal from '../components/Modal';
@@ -12,45 +12,47 @@ import {
 } from '../services/adminPropertyService';
 
 const FALLBACK_IMAGE = 'https://images.unsplash.com/photo-1568605114967-8130f3a36994?auto=format&fit=crop&w=1200&q=80';
-const BACKEND_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/api\/?$/, '');
-const HOME_VIP_HOUSES = [
-  'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1200&q=80',
-  'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=1200&q=80',
-  'https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=1200&q=80',
-  'https://images.unsplash.com/photo-1512917774080-9991f1c4c750?auto=format&fit=crop&w=1200&q=80',
-  'https://images.unsplash.com/photo-1613490493576-7fde63acd811?auto=format&fit=crop&w=1200&q=80',
-  'https://images.unsplash.com/photo-1600565193348-f74bd3c7ccdf?auto=format&fit=crop&w=1200&q=80',
-  'https://images.unsplash.com/photo-1580587771525-78b9dba3b914?auto=format&fit=crop&w=1200&q=80',
-  'https://images.unsplash.com/photo-1600585154526-990dced4db0d?auto=format&fit=crop&w=1200&q=80',
-  'https://images.unsplash.com/photo-1600573472592-401b489a3cdc?auto=format&fit=crop&w=1200&q=80',
-  'https://images.unsplash.com/photo-1523217582562-09d0def993a6?auto=format&fit=crop&w=1200&q=80',
-];
-
-const HOME_FLATS_INTERIOR = [
-  'https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?auto=format&fit=crop&w=1200&q=80',
-  'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?auto=format&fit=crop&w=1200&q=80',
-  'https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?auto=format&fit=crop&w=1200&q=80',
-  'https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?auto=format&fit=crop&w=1200&q=80',
-  'https://images.unsplash.com/photo-1493809842364-78817add7ffb?auto=format&fit=crop&w=1200&q=80',
-  'https://images.unsplash.com/photo-1502005229762-ee1b2b93e0f5?auto=format&fit=crop&w=1200&q=80',
-  'https://images.unsplash.com/photo-1513694203232-719a280e022f?auto=format&fit=crop&w=1200&q=80',
-  'https://images.unsplash.com/photo-1507089947368-19c1da9775ae?auto=format&fit=crop&w=1200&q=80',
-  'https://images.unsplash.com/photo-1484154218962-a197022b5858?auto=format&fit=crop&w=1200&q=80',
-  'https://images.unsplash.com/photo-1524758631624-e2822e304c36?auto=format&fit=crop&w=1200&q=80',
-];
-
-const HOME_APARTMENTS_BUILDINGS = [
-  'https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?auto=format&fit=crop&w=1200&q=80',
-  'https://images.unsplash.com/photo-1512918728675-ed5a9ecdebfd?auto=format&fit=crop&w=1200&q=80',
-  'https://images.unsplash.com/photo-1567496898669-ee935f5f647a?auto=format&fit=crop&w=1200&q=80',
-  'https://images.unsplash.com/photo-1515263487990-61b07816b324?auto=format&fit=crop&w=1200&q=80',
-  'https://images.unsplash.com/photo-1574362848149-11496d93a7c7?auto=format&fit=crop&w=1200&q=80',
-  'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&w=1200&q=80',
-  'https://images.unsplash.com/photo-1502005096674-719299666c97?auto=format&fit=crop&w=1200&q=80',
-  'https://images.unsplash.com/photo-1508873696983-2df5293cb32f?auto=format&fit=crop&w=1200&q=80',
-  'https://images.unsplash.com/photo-1512915922686-57c11dde9b6b?auto=format&fit=crop&w=1200&q=80',
-  'https://images.unsplash.com/photo-1600607687920-4e2a09cf159d?auto=format&fit=crop&w=1200&q=80',
-];
+const BACKEND_BASE_URL = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000')
+  .replace(/\/api\/?$/, '')
+  .replace(/\/$/, '') || 'http://localhost:5000';
+const PROPERTY_IMAGE_LIBRARY = {
+  Houses: [
+    'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1200&q=80',
+    'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=1200&q=80',
+    'https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=1200&q=80',
+    'https://images.unsplash.com/photo-1512917774080-9991f1c4c750?auto=format&fit=crop&w=1200&q=80',
+    'https://images.unsplash.com/photo-1613490493576-7fde63acd811?auto=format&fit=crop&w=1200&q=80',
+    'https://images.unsplash.com/photo-1600565193348-f74bd3c7ccdf?auto=format&fit=crop&w=1200&q=80',
+    'https://images.unsplash.com/photo-1580587771525-78b9dba3b914?auto=format&fit=crop&w=1200&q=80',
+    'https://images.unsplash.com/photo-1600585154526-990dced4db0d?auto=format&fit=crop&w=1200&q=80',
+    'https://images.unsplash.com/photo-1600573472592-401b489a3cdc?auto=format&fit=crop&w=1200&q=80',
+    'https://images.unsplash.com/photo-1523217582562-09d0def993a6?auto=format&fit=crop&w=1200&q=80',
+  ],
+  Flats: [
+    'https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?auto=format&fit=crop&w=1200&q=80',
+    'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?auto=format&fit=crop&w=1200&q=80',
+    'https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?auto=format&fit=crop&w=1200&q=80',
+    'https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?auto=format&fit=crop&w=1200&q=80',
+    'https://images.unsplash.com/photo-1493809842364-78817add7ffb?auto=format&fit=crop&w=1200&q=80',
+    'https://images.unsplash.com/photo-1502005229762-ee1b2b93e0f5?auto=format&fit=crop&w=1200&q=80',
+    'https://images.unsplash.com/photo-1513694203232-719a280e022f?auto=format&fit=crop&w=1200&q=80',
+    'https://images.unsplash.com/photo-1507089947368-19c1da9775ae?auto=format&fit=crop&w=1200&q=80',
+    'https://images.unsplash.com/photo-1484154218962-a197022b5858?auto=format&fit=crop&w=1200&q=80',
+    'https://images.unsplash.com/photo-1524758631624-e2822e304c36?auto=format&fit=crop&w=1200&q=80',
+  ],
+  Apartments: [
+    'https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?auto=format&fit=crop&w=1200&q=80',
+    'https://images.unsplash.com/photo-1512918728675-ed5a9ecdebfd?auto=format&fit=crop&w=1200&q=80',
+    'https://images.unsplash.com/photo-1567496898669-ee935f5f647a?auto=format&fit=crop&w=1200&q=80',
+    'https://images.unsplash.com/photo-1515263487990-61b07816b324?auto=format&fit=crop&w=1200&q=80',
+    'https://images.unsplash.com/photo-1574362848149-11496d93a7c7?auto=format&fit=crop&w=1200&q=80',
+    'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&w=1200&q=80',
+    'https://images.unsplash.com/photo-1502005096674-719299666c97?auto=format&fit=crop&w=1200&q=80',
+    'https://images.unsplash.com/photo-1508873696983-2df5293cb32f?auto=format&fit=crop&w=1200&q=80',
+    'https://images.unsplash.com/photo-1512915922686-57c11dde9b6b?auto=format&fit=crop&w=1200&q=80',
+    'https://images.unsplash.com/photo-1600607687920-4e2a09cf159d?auto=format&fit=crop&w=1200&q=80',
+  ],
+};
 
 const normalizeImageUrl = (value) => {
   if (!value || typeof value !== 'string') return FALLBACK_IMAGE;
@@ -67,43 +69,79 @@ const normalizeImageUrl = (value) => {
 
 const getPropertyId = (property) => property?._id || property?.id || property?.propertyId || property?.mongoId;
 
-const normalizePropertyType = (property) => String(property?.propertyType || property?.type || property?.category || 'House').trim();
+const normalizePropertyType = (property) => {
+  const candidates = [property?.propertyType, property?.type, property?.category, property?.title];
+  for (const candidate of candidates) {
+    const value = String(candidate || '').trim();
+    if (!value) continue;
+    const lower = value.toLowerCase();
+    if (lower.includes('house')) return 'House';
+    if (lower.includes('apartment')) return 'Apartment';
+    if (lower.includes('flat')) return 'Flat';
+    if (lower.includes('room')) return 'Room';
+    return value;
+  }
+  return 'House';
+};
 
 const getSectionImagePool = (sectionTitle = '') => {
-  if (sectionTitle === 'Houses') return HOME_VIP_HOUSES;
-  if (sectionTitle === 'Apartments') return HOME_APARTMENTS_BUILDINGS;
-  if (sectionTitle === 'Flats') return HOME_FLATS_INTERIOR;
+  if (sectionTitle === 'Houses') return PROPERTY_IMAGE_LIBRARY.Houses;
+  if (sectionTitle === 'Apartments') return PROPERTY_IMAGE_LIBRARY.Apartments;
+  if (sectionTitle === 'Flats') return PROPERTY_IMAGE_LIBRARY.Flats;
   return [];
 };
 
-const getSectionImageForCard = (sectionTitle, cardIndex, imageIndex) => {
+const getSectionImageForCard = (sectionTitle, cardIndex, imageIndex, propertyId) => {
   const pool = getSectionImagePool(sectionTitle);
   if (!pool.length) return FALLBACK_IMAGE;
-  const offset = ((cardIndex + 1) * (imageIndex + 1) + sectionTitle.length) % pool.length;
+
+  const seedValue = propertyId
+    ? String(propertyId).split('').reduce((sum, char) => sum + char.charCodeAt(0), 0)
+    : cardIndex + 1;
+
+  const offset = (seedValue + cardIndex + imageIndex + sectionTitle.length) % pool.length;
   return pool[offset];
 };
 
-const getPropertyImages = (property, sectionTitle = '', cardIndex = 0) => {
+const getPropertyImageCandidates = (property = {}) => {
   const list = [];
-  if (Array.isArray(property?.images) && property.images.length) {
-    property.images.forEach((item) => item && list.push(normalizeImageUrl(item)));
+  const addImage = (value) => {
+    if (!value || typeof value !== 'string') return;
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    const nextValue = normalizeImageUrl(trimmed);
+    if (nextValue && !list.includes(nextValue)) list.push(nextValue);
+  };
+
+  if (Array.isArray(property?.images)) {
+    property.images.forEach((item) => addImage(item));
   }
-  if (property?.image) list.push(normalizeImageUrl(property.image));
+
+  ['image', 'mainImage', 'coverImage', 'thumbnail', 'featuredImage'].forEach((key) => {
+    addImage(property?.[key]);
+  });
+
+  return list;
+};
+
+const getPropertyImages = (property, sectionTitle = '', cardIndex = 0) => {
+  const propertyId = getPropertyId(property);
+  const list = getPropertyImageCandidates(property);
 
   const sectionPool = getSectionImagePool(sectionTitle);
   if (sectionPool.length) {
     for (let imageIndex = 0; imageIndex < 3; imageIndex += 1) {
-      const fallback = getSectionImageForCard(sectionTitle, cardIndex, imageIndex);
+      const fallback = getSectionImageForCard(sectionTitle, cardIndex, imageIndex, propertyId);
       if (fallback && !list.includes(fallback)) {
         list.push(fallback);
       }
     }
   }
 
-  const deduped = [...new Set(list.filter(Boolean))];
+  const deduped = list.filter(Boolean);
   if (!deduped.length) deduped.push(FALLBACK_IMAGE);
   while (deduped.length < 3) {
-    const nextFallback = getSectionImageForCard(sectionTitle, cardIndex, deduped.length) || FALLBACK_IMAGE;
+    const nextFallback = getSectionImageForCard(sectionTitle, cardIndex, deduped.length, propertyId) || FALLBACK_IMAGE;
     if (!deduped.includes(nextFallback)) deduped.push(nextFallback);
     else deduped.push(FALLBACK_IMAGE);
   }
@@ -132,6 +170,12 @@ function AdminHomePage({ appData, setAppData, notify }) {
   const properties = appData?.properties || [];
   const fileInputRefs = useRef({});
   const [deleteTarget, setDeleteTarget] = useState(null);
+
+  useEffect(() => {
+    if (!properties.length) {
+      refreshProperties();
+    }
+  }, []);
   const [editingProperty, setEditingProperty] = useState(null);
   const [editForm, setEditForm] = useState({
     title: '',
@@ -181,29 +225,63 @@ function AdminHomePage({ appData, setAppData, notify }) {
 
   const handleImageSelection = async (property, imageIndex, file) => {
     if (!file) return;
+
+    const propertyId = getPropertyId(property);
+    if (!propertyId) {
+      notify({ message: 'This property is missing an ID, so the image cannot be replaced.', variant: 'error' });
+      return;
+    }
+
     try {
-      const currentImages = getPropertyImages(property);
-      if (currentImages.length > imageIndex) {
-        await replacePropertyImage(getPropertyId(property), imageIndex, file);
-      } else {
-        await uploadPropertyImage(getPropertyId(property), file);
+      notify({ message: 'Uploading image...', variant: 'info' });
+
+      const currentImages = Array.isArray(property?.images) && property.images.length
+        ? property.images.filter(Boolean)
+        : (property?.image ? [property.image] : []);
+
+      const hasExistingImage = currentImages.length > 0 && typeof imageIndex === 'number' && Boolean(currentImages[imageIndex]);
+      const result = hasExistingImage
+        ? await replacePropertyImage(propertyId, imageIndex, file)
+        : await uploadPropertyImage(propertyId, file);
+
+      const nextImages = Array.isArray(result?.images) && result.images.length
+        ? result.images
+            .map((img) => (typeof img === 'string' ? img.split('?')[0] : (img && typeof img === 'object' ? img.url?.split('?')[0] : '')))
+            .filter(Boolean)
+        : Array.isArray(result?.property?.images) && result.property.images.length
+          ? result.property.images
+              .map((img) => (typeof img === 'string' ? img.split('?')[0] : (img && typeof img === 'object' ? img.url?.split('?')[0] : '')))
+              .filter(Boolean)
+          : currentImages.map((img) => (typeof img === 'string' ? img.split('?')[0] : (img && typeof img === 'object' ? img.url?.split('?')[0] : ''))).filter(Boolean);
+
+      const cleanedImages = [...new Set(nextImages.filter(Boolean))];
+      if (!cleanedImages.length) {
+        throw new Error('No image URL in response');
       }
+
       await refreshProperties();
       notify({ message: 'Image updated successfully.', variant: 'success' });
     } catch (error) {
       console.error('Image update failed:', error);
       notify({ message: error?.message || 'Unable to update image.', variant: 'error' });
+      await refreshProperties();
     }
   };
 
   const handleDeleteImage = async (property, imageIndex) => {
     try {
-      await deletePropertyImage(getPropertyId(property), imageIndex);
+      const propertyId = getPropertyId(property);
+      if (!propertyId) {
+        throw new Error('Property ID missing');
+      }
+
+      await deletePropertyImage(propertyId, imageIndex);
       await refreshProperties();
-      notify({ message: 'Image deleted.', variant: 'success' });
+      notify({ message: 'Image deleted successfully.', variant: 'success' });
     } catch (error) {
       console.error('Delete image failed:', error);
       notify({ message: error?.message || 'Unable to delete image.', variant: 'error' });
+      await refreshProperties();
     }
   };
 
@@ -276,24 +354,31 @@ function AdminHomePage({ appData, setAppData, notify }) {
     const images = getPropertyImages(property, sectionTitle, cardIndex);
     const primaryImage = images[0] || FALLBACK_IMAGE;
     const isRentSection = sectionTitle === 'Flats';
-    const priceText = isRentSection ? 'Rent' : (property.price || property.salePrice || 'Contact');
-    const tagColor = sectionTitle === 'Flats' ? '#14b8a6' : sectionTitle === 'Apartments' ? '#0ea5e9' : '#d97706';
+    const priceValue = property.rent || property.rentPrice || property.price || property.salePrice || 'Contact';
+    const priceText = isRentSection ? 'Rent' : priceValue;
+    const tagColor = sectionTitle === 'Flats' ? '#2563eb' : sectionTitle === 'Apartments' ? '#0ea5e9' : '#16a34a';
+    const titleText = property.title || property.propertyName || 'Property';
+    const addressText = property.address || property.location || property.city || 'Property address';
+    const areaText = property.area ? `${property.area} sq ft` : 'Area';
 
     return (
-      <article key={propertyId || property.title} className="admin-home-card property-card home-category-card">
-        <div className="admin-home-visual">
+      <article key={propertyId || titleText} className="admin-home-card property-card home-category-card">
+        <div className="admin-home-visual home-category-image-wrap">
           <img
             src={primaryImage}
-            alt={property.title || 'Property image'}
+            alt={titleText}
             onError={(event) => {
               event.currentTarget.onerror = null;
               event.currentTarget.src = FALLBACK_IMAGE;
             }}
           />
-          <div className="admin-home-image-overlay">
+          <div className="admin-home-image-overlay home-category-overlay">
             <button type="button" onClick={() => triggerHiddenInput(propertyId, 0)}>Replace</button>
             <button type="button" className="danger" onClick={() => handleDeleteImage(property, 0)}>Delete</button>
           </div>
+          <span className="admin-home-image-badge" style={{ background: tagColor }}>
+            {isRentSection ? 'FOR RENT' : 'FEATURED'}
+          </span>
           <input
             ref={(node) => {
               if (node) {
@@ -315,20 +400,23 @@ function AdminHomePage({ appData, setAppData, notify }) {
         <div className="card-body admin-home-card-body">
           <div className="card-top-row">
             <span className="admin-home-tag" style={{ background: tagColor }}>
-              {sectionTitle === 'Flats' ? 'FOR RENT' : 'FEATURED'}
+              {isRentSection ? 'FOR RENT' : 'FEATURED'}
             </span>
             <span className="card-price">{priceText}</span>
           </div>
-          <div className="card-title">{property.title}</div>
-          <div className="card-address">{property.address || property.location || 'Property address'}</div>
+          <div className="card-title">{titleText}</div>
+          <div className="card-address">{addressText}</div>
           <div className="meta-row">
             <span className="meta-pill">{property.bedrooms || 0} beds</span>
             <span className="meta-pill">{property.bathrooms || 0} baths</span>
-            <span className="meta-pill">{property.area || 'Area'}</span>
+            <span className="meta-pill">{areaText}</span>
           </div>
           <div className="admin-home-actions">
-            <button type="button" className="admin-home-ghost-button" onClick={() => setDeleteTarget(property)}>Delete</button>
-            <button type="button" className="admin-main-button" onClick={() => openEditModal(property)}>Update</button>
+            <button type="button" className="admin-home-ghost-button admin-home-inquiry-button">Rent Inquiry</button>
+            <button type="button" className="admin-main-button admin-home-rent-button">Rent</button>
+            <button type="button" className="admin-home-save-button" aria-label="Save property">
+              <span>♡</span> Save
+            </button>
           </div>
         </div>
       </article>
@@ -345,9 +433,15 @@ function AdminHomePage({ appData, setAppData, notify }) {
         <Link to="/admin/properties" className="btn-ghost">View all</Link>
       </div>
 
-      <div className="home-category-grid admin-home-category-grid">
-        {(category.items && category.items.length ? category.items : []).map((property, index) => renderPropertyCard(property, category.title, index))}
-      </div>
+      {!category.items || category.items.length === 0 ? (
+        <div style={{ padding: '20px 12px 8px', color: '#64748b', textAlign: 'center' }}>
+          No listings yet in this category.
+        </div>
+      ) : (
+        <div className="home-category-grid admin-home-category-grid">
+          {category.items.map((property, index) => renderPropertyCard(property, category.title, index))}
+        </div>
+      )}
     </section>
   );
 

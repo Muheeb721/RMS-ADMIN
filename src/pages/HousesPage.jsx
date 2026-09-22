@@ -46,7 +46,9 @@ const HOUSE_DEFAULT_IMAGES = [
   'https://images.unsplash.com/photo-1523217582562-09d0def993a6?auto=format&fit=crop&w=900&q=80',
 ];
 const HOUSE_DEFAULT_IMAGE = HOUSE_DEFAULT_IMAGES[0];
-const BACKEND_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/api\/?$/, '');
+const BACKEND_BASE_URL = (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000')
+  .replace(/\/api\/?$/, '')
+  .replace(/\/$/, '') || 'http://localhost:5000';
 const normalizeImageUrl = (value) => {
   if (!value || typeof value !== 'string') return HOUSE_DEFAULT_IMAGE;
   const trimmed = value.trim();
@@ -64,7 +66,7 @@ const getPropertyImageUrl = (property, index = 0) => {
   if (property?.coverImage) candidateValues.push(property.coverImage);
   const deduped = [...new Set(candidateValues.map((item) => normalizeImageUrl(item)).filter(Boolean))];
   const fallback = HOUSE_DEFAULT_IMAGES[(Number(index) || 0) % HOUSE_DEFAULT_IMAGES.length] || HOUSE_DEFAULT_IMAGE;
-  return deduped[0] || deduped[index] || fallback;
+  return deduped[index] || deduped[0] || fallback;
 };
 const getPropertyId = (property) => property?._id || property?.id || property?.propertyId || property?.mongoId;
 
@@ -375,6 +377,37 @@ function HousesPage({ appData, setAppData, notify }) {
     })();
   };
 
+  const handleReplaceImage = async (propertyId, index, file) => {
+    if (!file) return;
+    const form = new FormData();
+    form.append('image', file);
+    try {
+      notify && notify({ message: 'Replacing image...', variant: 'info' });
+      await apiService.replacePropertyImage(propertyId, index, form);
+      await refreshProperties();
+      const resp = await apiService.getProperty(propertyId);
+      if (resp?.success) setSelectedProperty(resp.data);
+      notify && notify({ message: 'Image replaced successfully.', variant: 'success' });
+    } catch (e) {
+      console.error('Replace image failed', e);
+      notify && notify({ message: e?.message || 'Unable to replace image.', variant: 'error' });
+    }
+  };
+
+  const handleDeleteImage = async (propertyId, index) => {
+    try {
+      notify && notify({ message: 'Deleting image...', variant: 'info' });
+      await apiService.deletePropertyImage(propertyId, index);
+      await refreshProperties();
+      const resp = await apiService.getProperty(propertyId);
+      if (resp?.success) setSelectedProperty(resp.data);
+      notify && notify({ message: 'Image deleted successfully.', variant: 'success' });
+    } catch (e) {
+      console.error('Delete image failed', e);
+      notify && notify({ message: e?.message || 'Unable to delete image.', variant: 'error' });
+    }
+  };
+
   const paymentHistory = (appData.payments || []).filter((payment) => (payment.propertyName || payment.property) === (selectedProperty?.title || ''));
   const duesForProperty = (appData.dues || []).filter((due) => (due.propertyName || due.property) === (selectedProperty?.title || ''));
 
@@ -669,6 +702,34 @@ function HousesPage({ appData, setAppData, notify }) {
                   ))}
                 </ul>
               ) : <p>No payment history for this house.</p>}
+            </div>
+
+            <div className="subsection-block">
+              <h5>Images</h5>
+              <div className="image-gallery admin-gallery">
+                {(() => {
+                  const rawImages = Array.isArray(selectedProperty.images) ? selectedProperty.images.slice(0, 6) : [];
+                  const candidateValues = [];
+                  rawImages.forEach((it) => it && candidateValues.push(it));
+                  if (selectedProperty.image) candidateValues.push(selectedProperty.image);
+                  if (selectedProperty.mainImage) candidateValues.push(selectedProperty.mainImage);
+                  if (selectedProperty.coverImage) candidateValues.push(selectedProperty.coverImage);
+                  const deduped = [...new Set(candidateValues.map((item) => normalizeImageUrl(item)).filter(Boolean))];
+                  const slots = Array.from({ length: 3 }, (_, i) => deduped[i] || deduped[0] || HOUSE_DEFAULT_IMAGES[i % HOUSE_DEFAULT_IMAGES.length]);
+                  return slots.map((url, idx) => (
+                    <div key={idx} className="gallery-item">
+                      <img src={url} alt={`Image ${idx + 1}`} className="property-thumb" onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = HOUSE_DEFAULT_IMAGES[idx % HOUSE_DEFAULT_IMAGES.length]; }} />
+                      <div className="gallery-actions">
+                        <label className="btn small">
+                          Replace
+                          <input type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => handleReplaceImage(getPropertyId(selectedProperty), idx, e.target.files?.[0])} />
+                        </label>
+                        <button type="button" className="btn small danger" onClick={() => handleDeleteImage(getPropertyId(selectedProperty), idx)}>Delete</button>
+                      </div>
+                    </div>
+                  ));
+                })()}
+              </div>
             </div>
 
             <div className="subsection-block">

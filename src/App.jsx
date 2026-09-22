@@ -127,6 +127,17 @@ function App() {
     clearAuthState();
     clearAdminAuthToken();
     setIsAuthenticated(false);
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem('rms_auth_session');
+      window.localStorage.removeItem('rms_user_role');
+      window.localStorage.removeItem('rms_admin_auth');
+      window.localStorage.removeItem('rms_admin_token');
+      window.localStorage.removeItem('rms_token');
+      delete window.__RMS_AUTH_TOKEN;
+      delete window.__rms_inmemory_token;
+      window.history.replaceState(null, '', '/login');
+      window.location.replace('/login');
+    }
     setToast({ message: 'Logged out successfully.', variant: 'info' });
   };
 

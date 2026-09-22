@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { apiService } from '../services/api';
 import { useNavigate } from 'react-router-dom';
 import './ProfilePage.css';
@@ -9,6 +9,7 @@ const emptyProfile = () => ({
   email: '',
   phone: '',
   role: '',
+  profileImage: '',
 });
 
 function ProfilePage({ appData, setAppData, notify }) {
@@ -20,18 +21,40 @@ function ProfilePage({ appData, setAppData, notify }) {
     email: 'admin@rms.com',
     phone: '+92 300 1234567',
     role: 'Super Administrator',
+    profileImage: '',
   };
 
-  const savedProfile = appData.profile || appData.admin || defaultProfile;
+  const savedProfile = useMemo(() => appData.profile || appData.admin || defaultProfile, [appData, defaultProfile]);
   const [form, setForm] = useState(emptyProfile());
-  const [showConfirm, setShowConfirm] = useState(false);
+  const [profileImageFile, setProfileImageFile] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    setForm(emptyProfile());
-    setShowConfirm(false);
+    const next = {
+      fullName: savedProfile.fullName || savedProfile.name || '',
+      name: savedProfile.name || savedProfile.fullName || '',
+      email: savedProfile.email || '',
+      phone: savedProfile.phone || '',
+      role: savedProfile.role || '',
+      profileImage: savedProfile.profileImage || savedProfile.image || '',
+    };
+
+    setForm(next);
+    setPreviewUrl(next.profileImage || '');
+    setProfileImageFile(null);
   }, [savedProfile]);
 
-  const handleSubmit = (event) => {
+  const handleImageChange = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setProfileImageFile(file);
+    const nextUrl = URL.createObjectURL(file);
+    setPreviewUrl(nextUrl);
+  };
+
+  const handleSubmit = async (event) => {
     event.preventDefault();
 
     const cleanedForm = {
@@ -42,100 +65,75 @@ function ProfilePage({ appData, setAppData, notify }) {
       role: (form.role || '').trim(),
     };
 
-    const isEmpty = !cleanedForm.fullName && !cleanedForm.name && !cleanedForm.email && !cleanedForm.phone && !cleanedForm.role;
-    if (isEmpty) {
+    if (!cleanedForm.fullName && !cleanedForm.name && !cleanedForm.email && !cleanedForm.phone && !cleanedForm.role) {
       notify({ message: 'Please enter profile details before updating.', variant: 'error' });
       return;
     }
 
-    setShowConfirm(true);
-  };
+    setIsSubmitting(true);
 
-  const handleConfirmUpdate = () => {
-    const cleanedForm = {
-      fullName: (form.fullName || form.name || '').trim(),
-      name: (form.name || form.fullName || '').trim(),
-      email: (form.email || '').trim(),
-      phone: (form.phone || '').trim(),
-      role: (form.role || '').trim(),
-    };
+    try {
+      const formData = new FormData();
+      const effectiveName = cleanedForm.name || cleanedForm.fullName;
+      const effectiveFullName = cleanedForm.fullName || cleanedForm.name;
+      const effectiveRole = cleanedForm.role || 'admin';
 
-    // attempt to persist profile update via backend API if admin id exists
-    (async () => {
-      const savedProfile = appData.profile || appData.admin || defaultProfile;
-      const userId = savedProfile?.id || savedProfile?._id || savedProfile?.userId;
+      formData.append('name', effectiveName);
+      formData.append('fullName', effectiveFullName);
+      formData.append('email', cleanedForm.email);
+      formData.append('phone', cleanedForm.phone);
+      formData.append('role', effectiveRole);
 
-      const payload = {
-        name: cleanedForm.name || cleanedForm.fullName,
-        fullName: cleanedForm.fullName || cleanedForm.name,
+      if (profileImageFile) {
+        formData.append('profileImage', profileImageFile);
+      } else if (form.profileImage) {
+        formData.append('profileImage', form.profileImage);
+      }
+
+      const payload = profileImageFile ? formData : {
+        name: effectiveName,
+        fullName: effectiveFullName,
         email: cleanedForm.email,
         phone: cleanedForm.phone,
-        role: cleanedForm.role,
+        role: effectiveRole,
+        profileImage: form.profileImage || savedProfile.profileImage || '',
         profile: {
-          name: cleanedForm.name || cleanedForm.fullName,
+          name: effectiveName,
+          fullName: effectiveFullName,
           email: cleanedForm.email,
           phone: cleanedForm.phone,
+          role: effectiveRole,
+          profileImage: form.profileImage || savedProfile.profileImage || '',
         },
       };
 
-      if (userId) {
-        try {
-          const resp = await apiService.request(`/admin/users/${userId}`, { method: 'PUT', body: payload });
-          const updated = resp?.data || {};
-          setAppData((prev) => ({
-            ...prev,
-            admin: { ...(prev.admin || {}), ...updated },
-            profile: { ...(prev.profile || {}), ...updated },
-            notifications: [
-              {
-                id: `notif-${Date.now()}`,
-                title: 'Profile updated',
-                message: `${updated.name || updated.fullName || cleanedForm.name} updated the admin profile.`,
-                detail: `Name: ${updated.name || updated.fullName} | Email: ${updated.email} | Phone: ${updated.phone} | Role: ${updated.role}`,
-                type: 'Profile',
-                recipient: updated.email || 'Admin',
-                date: new Date().toISOString(),
-                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                read: false,
-                priority: 'High',
-              },
-              ...(prev.notifications || []),
-            ],
-          }));
+      const profileResponse = await apiService.request('/users/profile', {
+        method: 'PUT',
+        body: payload,
+      });
 
-          setForm(emptyProfile());
-          setShowConfirm(false);
-          notify({ message: 'Profile updated successfully.', variant: 'success' });
-          navigate('/admin');
-          return;
-        } catch (error) {
-          console.error('Profile update failed', error);
-          notify({ message: error.message || 'Unable to update profile on server.', variant: 'error' });
-          setShowConfirm(false);
-          return;
-        }
-      }
-
-      // fallback to local update if no userId present
-      const nextProfile = {
-        ...defaultProfile,
-        ...cleanedForm,
-        fullName: cleanedForm.fullName || cleanedForm.name || defaultProfile.fullName,
-        name: cleanedForm.name || cleanedForm.fullName || defaultProfile.name,
+      const updated = profileResponse?.data || {
+        ...savedProfile,
+        name: effectiveName,
+        fullName: effectiveFullName,
+        email: cleanedForm.email,
+        phone: cleanedForm.phone,
+        role: effectiveRole,
+        profileImage: form.profileImage || savedProfile.profileImage || '',
       };
 
       setAppData((prev) => ({
         ...prev,
-        admin: { ...(prev.admin || {}), ...nextProfile },
-        profile: nextProfile,
+        admin: { ...(prev.admin || {}), ...updated },
+        profile: { ...(prev.profile || {}), ...updated },
         notifications: [
           {
             id: `notif-${Date.now()}`,
             title: 'Profile updated',
-            message: `${nextProfile.fullName} updated the admin profile.`,
-            detail: `Name: ${nextProfile.fullName} | Email: ${nextProfile.email} | Phone: ${nextProfile.phone} | Role: ${nextProfile.role}`,
+            message: `${updated.name || updated.fullName || effectiveName} updated the admin profile.`,
+            detail: `Name: ${updated.name || updated.fullName} | Email: ${updated.email} | Phone: ${updated.phone} | Role: ${updated.role || 'admin'}`,
             type: 'Profile',
-            recipient: nextProfile.email || 'Admin',
+            recipient: updated.email || 'Admin',
             date: new Date().toISOString(),
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             read: false,
@@ -145,11 +143,24 @@ function ProfilePage({ appData, setAppData, notify }) {
         ],
       }));
 
-      setForm(emptyProfile());
-      setShowConfirm(false);
-      notify({ message: 'Profile updated locally.', variant: 'success' });
+      notify({ message: 'Profile updated successfully.', variant: 'success' });
+      setProfileImageFile(null);
+      setForm((prev) => ({
+        ...prev,
+        fullName: effectiveFullName,
+        name: effectiveName,
+        email: cleanedForm.email,
+        phone: cleanedForm.phone,
+        role: effectiveRole,
+        profileImage: updated.profileImage || previewUrl || prev.profileImage || '',
+      }));
       navigate('/admin');
-    })();
+    } catch (error) {
+      console.error('Profile update failed', error);
+      notify({ message: error?.message || 'Unable to update profile on server.', variant: 'error' });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -179,13 +190,30 @@ function ProfilePage({ appData, setAppData, notify }) {
               <input value={form.phone || ''} onChange={(event) => setForm((prev) => ({ ...prev, phone: event.target.value }))} />
             </label>
           </div>
+
+          <div className="form-grid two-col" style={{ alignItems: 'end' }}>
+            <label>
+              Profile Image
+              <input type="file" accept="image/*" onChange={handleImageChange} />
+            </label>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', minHeight: '64px' }}>
+              {(previewUrl || form.profileImage) && (
+                <img
+                  src={previewUrl || form.profileImage}
+                  alt="Admin profile preview"
+                  style={{ width: 72, height: 72, borderRadius: '50%', objectFit: 'cover', border: '2px solid #dfe7f5' }}
+                  onError={(event) => {
+                    event.currentTarget.style.display = 'none';
+                  }}
+                />
+              )}
+            </div>
+          </div>
+
           <div className="form-actions" style={{ display: 'flex', gap: '12px', marginTop: '16px', flexWrap: 'wrap' }}>
-            <button type="submit" className="primary-button">Update Profile</button>
-            {showConfirm && (
-              <button type="button" className="primary-button" onClick={handleConfirmUpdate}>
-                Confirm Update
-              </button>
-            )}
+            <button type="submit" className="primary-button" disabled={isSubmitting}>
+              {isSubmitting ? 'Updating...' : 'Update Profile'}
+            </button>
           </div>
         </form>
       </section>

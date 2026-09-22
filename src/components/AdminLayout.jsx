@@ -18,7 +18,7 @@ import AnnouncementsPage from '../pages/AnnouncementsPage';
 import AreasPage from '../pages/AreasPage';
 import ReviewsPage from '../pages/ReviewsPage';
 import ReportsPage from '../pages/ReportsPage';
-import ProfilePage from '../pages/ProfilePage';
+import AdminProfile from '../pages/AdminProfile';
 import SettingsPage from '../pages/SettingsPage';
 import RentManagementPage from '../pages/RentManagementPage';
 import TenantProfilePage from '../pages/TenantProfilePage';
@@ -353,7 +353,7 @@ function AdminLayout({ appData, setAppData, onLogout, notify }) {
           <Route path="/reviews" element={<ReviewsPage reviews={appData.reviews || []} />} />
           <Route path="/reports" element={<ReportsPage appData={appData} setAppData={setAppData} />} />
           <Route path="/tenant-profile/:tenantKey" element={<TenantProfilePage appData={appData} setAppData={setAppData} />} />
-          <Route path="/profile" element={<ProfilePage appData={appData} setAppData={setAppData} notify={notify} />} />
+          <Route path="/profile" element={<AdminProfile appData={appData} setAppData={setAppData} notify={notify} />} />
           <Route path="/settings" element={<SettingsPage appData={appData} setAppData={setAppData} notify={notify} />} />
           <Route path="/tenant-profiles" element={<TenantProfilesPage appData={appData} setAppData={setAppData} notify={notify} />} />
           <Route path="*" element={<Navigate to="/admin" replace />} />

@@ -533,19 +533,41 @@ export const persistAppData = (appData) => {
   }
 };
 
+const hasValidAdminToken = () => {
+  if (typeof window === 'undefined') return false;
+
+  const token = window.localStorage.getItem('rms_admin_token')
+    || window.localStorage.getItem('rms_token')
+    || window.__RMS_AUTH_TOKEN
+    || window.__rms_inmemory_token;
+
+  return Boolean(token && String(token).trim());
+};
+
 export const loadAuthState = () => {
   if (typeof window === 'undefined') return false;
-  return window.localStorage.getItem(AUTH_KEY) === 'true';
+  const authFlag = window.localStorage.getItem(AUTH_KEY) === 'true';
+  return authFlag && hasValidAdminToken();
 };
 
 export const setAuthState = (value) => {
   if (typeof window === 'undefined') return;
+
+  if (value && !hasValidAdminToken()) {
+    window.localStorage.removeItem(AUTH_KEY);
+    return;
+  }
+
   window.localStorage.setItem(AUTH_KEY, String(Boolean(value)));
 };
 
 export const clearAuthState = () => {
   if (typeof window === 'undefined') return;
   window.localStorage.removeItem(AUTH_KEY);
+  window.localStorage.removeItem('rms_admin_token');
+  window.localStorage.removeItem('rms_token');
+  delete window.__RMS_AUTH_TOKEN;
+  delete window.__rms_inmemory_token;
 };
 
 export const saveLoginCredentials = (email, password) => {
@@ -567,4 +589,8 @@ export const clearAllAppStorage = () => {
 
   window.localStorage.removeItem(AUTH_KEY);
   window.localStorage.removeItem(LOGIN_CREDENTIALS_KEY);
+  window.localStorage.removeItem('rms_admin_token');
+  window.localStorage.removeItem('rms_token');
+  delete window.__RMS_AUTH_TOKEN;
+  delete window.__rms_inmemory_token;
 };

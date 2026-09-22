@@ -4,7 +4,16 @@ import Modal from '../components/Modal';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import { generateId } from '../services/localStorage';
 import { apiService } from '../services/api';
-import { createAdminProperty, deleteAdminProperty, updateAdminProperty, uploadPropertyImage, deletePropertyImage } from '../services/adminPropertyService';
+import {
+  createAdminProperty,
+  deleteAdminProperty,
+  updateAdminProperty,
+  uploadPropertyImage,
+  replacePropertyImage,
+  deletePropertyImage,
+  replacePropertyImageById,
+  deletePropertyImageById,
+} from '../services/adminPropertyService';
 
 const emptyForm = {
   title: '',
@@ -361,8 +370,8 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
   const handleUploadImageForSelected = async (event) => {
     const file = event.target.files?.[0];
     if (!file || !selectedProperty) return;
+
     try {
-      // client-side validation
       const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
       const MAX_BYTES = Number(import.meta.env.VITE_UPLOAD_MAX_SIZE || 5 * 1024 * 1024);
       if (!allowedTypes.includes(file.type)) {
@@ -374,11 +383,25 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
         return;
       }
 
+      const propertyId = getPropertyId(selectedProperty);
+      if (!propertyId) {
+        throw new Error('Property ID is missing.');
+      }
+
       notify({ message: 'Uploading image...', variant: 'info' });
-      const result = await uploadPropertyImage(getPropertyId(selectedProperty), file);
-      const updatedImages = result?.images || (result?.url ? [result.url, ...(selectedProperty.images || [])] : selectedProperty.images || []);
-      const updated = { ...selectedProperty, images: updatedImages, image: updatedImages[0] || selectedProperty.image };
-      await updateAdminProperty(getPropertyId(updated), { images: updatedImages, image: updated.image });
+      const result = await uploadPropertyImage(propertyId, file);
+      const nextImages = Array.isArray(result?.images) && result.images.length
+        ? result.images.map((img) => (typeof img === 'string' ? img.split('?')[0] : (img && typeof img === 'object' ? img.url?.split('?')[0] : ''))).filter(Boolean)
+        : Array.isArray(result?.property?.images) && result.property.images.length
+          ? result.property.images.map((img) => (typeof img === 'string' ? img.split('?')[0] : (img && typeof img === 'object' ? img.url?.split('?')[0] : ''))).filter(Boolean)
+          : [result?.url || `/images/${file.name}`];
+
+      const updated = {
+        ...selectedProperty,
+        images: nextImages,
+        image: nextImages[0] || '',
+      };
+
       await refreshProperties();
       setSelectedProperty(updated);
       notify({ message: 'Image uploaded.', variant: 'success' });
@@ -388,14 +411,87 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
     }
   };
 
+  const handleReplaceImageForSelected = async (index, file) => {
+    if (!file || !selectedProperty) return;
+
+    const propertyId = getPropertyId(selectedProperty);
+    const currentImages = Array.isArray(selectedProperty.images)
+      ? [...selectedProperty.images]
+      : (selectedProperty.image ? [selectedProperty.image] : []);
+
+    if (!currentImages[index]) return;
+
+    try {
+      const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+      const MAX_BYTES = Number(import.meta.env.VITE_UPLOAD_MAX_SIZE || 5 * 1024 * 1024);
+      if (!allowedTypes.includes(file.type)) {
+        notify({ message: 'Invalid image type. Only JPG, PNG and WEBP are allowed.', variant: 'error' });
+        return;
+      }
+      if (file.size && file.size > MAX_BYTES) {
+        notify({ message: `Image too large. Maximum ${Math.round(MAX_BYTES / 1024 / 1024)}MB allowed.`, variant: 'error' });
+        return;
+      }
+
+      notify({ message: 'Replacing image...', variant: 'info' });
+      const targetImage = currentImages[index];
+      const result = (targetImage && typeof targetImage === 'object' && targetImage._id)
+        ? await replacePropertyImageById(propertyId, targetImage._id, file)
+        : await replacePropertyImage(propertyId, index, file);
+
+      const nextImages = Array.isArray(result?.images) && result.images.length
+        ? result.images.map((img) => (typeof img === 'string' ? img.split('?')[0] : (img && typeof img === 'object' ? img.url?.split('?')[0] : ''))).filter(Boolean)
+        : Array.isArray(result?.property?.images) && result.property.images.length
+          ? result.property.images.map((img) => (typeof img === 'string' ? img.split('?')[0] : (img && typeof img === 'object' ? img.url?.split('?')[0] : ''))).filter(Boolean)
+          : currentImages.map((img) => (typeof img === 'string' ? img.split('?')[0] : (img && typeof img === 'object' ? img.url?.split('?')[0] : ''))).filter(Boolean);
+
+      const updated = {
+        ...selectedProperty,
+        images: nextImages,
+        image: nextImages[0] || '',
+      };
+
+      await refreshProperties();
+      setSelectedProperty(updated);
+      notify({ message: 'Image replaced successfully.', variant: 'success' });
+    } catch (e) {
+      console.error('Replace failed', e);
+      notify({ message: e.message || 'Unable to replace image.', variant: 'error' });
+    }
+  };
+
   const handleDeleteImageForSelected = async (index) => {
     if (!selectedProperty) return;
+
+    const propertyId = getPropertyId(selectedProperty);
+    const currentImages = Array.isArray(selectedProperty.images)
+      ? [...selectedProperty.images]
+      : (selectedProperty.image ? [selectedProperty.image] : []);
+
+    if (!currentImages[index]) return;
+
     try {
       notify({ message: 'Deleting image...', variant: 'info' });
-      await deletePropertyImage(getPropertyId(selectedProperty), index);
-      const nextImages = (selectedProperty.images || []).filter((_, i) => i !== index);
-      const updated = { ...selectedProperty, images: nextImages, image: nextImages[0] || '' };
-      await updateAdminProperty(getPropertyId(updated), { images: updated.images, image: updated.image });
+      const targetImage = currentImages[index];
+      if (targetImage && typeof targetImage === 'object' && targetImage._id) {
+        await deletePropertyImageById(propertyId, targetImage._id);
+      } else {
+        await deletePropertyImage(propertyId, index);
+      }
+
+      const result = await apiService.request(`/properties/${propertyId}`);
+      const nextImages = Array.isArray(result?.data?.images)
+        ? result.data.images.map((img) => (typeof img === 'string' ? img.split('?')[0] : (img && typeof img === 'object' ? img.url?.split('?')[0] : ''))).filter(Boolean)
+        : Array.isArray(result?.data?.property?.images)
+          ? result.data.property.images.map((img) => (typeof img === 'string' ? img.split('?')[0] : (img && typeof img === 'object' ? img.url?.split('?')[0] : ''))).filter(Boolean)
+          : currentImages.filter((_, i) => i !== index).map((img) => (typeof img === 'string' ? img.split('?')[0] : (img && typeof img === 'object' ? img.url?.split('?')[0] : ''))).filter(Boolean);
+
+      const updated = {
+        ...selectedProperty,
+        images: nextImages,
+        image: nextImages[0] || '',
+      };
+
       await refreshProperties();
       setSelectedProperty(updated);
       notify({ message: 'Image deleted.', variant: 'success' });
@@ -476,7 +572,7 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
       </section>
 
       <section className="panel-card">
-        <div className="card-header">
+              <div className="card-header">
           <h3>Property Inventory</h3>
           <span className="mini-badge">{filteredProperties.length} properties</span>
         </div>
@@ -507,7 +603,7 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
                 {filteredProperties.map((property) => (
                   <tr key={getPropertyId(property) || property.id}>
                     <td>
-                      <img src={property.image || 'https://images.unsplash.com/photo-1568605114967-8130f3a36994?auto=format&fit=crop&w=300&q=80'} alt={property.title} className="property-thumb" />
+                      <img src={property.image || (Array.isArray(property.images) && property.images[0] ? (typeof property.images[0] === 'string' ? property.images[0] : property.images[0].url) : 'https://images.unsplash.com/photo-1568605114967-8130f3a36994?auto=format&fit=crop&w=300&q=80')} alt={property.title} className="property-thumb" />
                     </td>
                     <td>
                       <strong>{property.title}</strong>
@@ -572,11 +668,12 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
           <div className="form-grid two-col">
             <label>
               Category
-              <select name="category" value={formData.category} onChange={handleFieldChange}>
-                {['House', 'Apartment', 'Flat', 'Room', 'Hostel'].map((type) => (
-                  <option key={type} value={type}>{type}</option>
-                ))}
-              </select>
+              <input
+                name="category"
+                value={formData.category}
+                onChange={handleFieldChange}
+                placeholder="e.g. House, Villa, Tower, Luxury Flat"
+              />
             </label>
             <label>
               Status
@@ -762,7 +859,7 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
 
             <div className="subsection-block">
               <h5>Images</h5>
-              <p>Upload, preview, delete or reorder property images.</p>
+              <p>Upload, preview, replace or delete property images.</p>
               <label className="file-label">
                 Add image
                 <input type="file" accept="image/*" onChange={handleUploadImageForSelected} />
@@ -772,6 +869,19 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
                   <div className="image-item" key={`${String(selectedProperty.id||selectedProperty._id)}-${idx}`}>
                     <img src={img} alt={`img-${idx}`} />
                     <div className="image-controls">
+                      <label className="small file-label" style={{ display: 'inline-flex', cursor: 'pointer' }}>
+                        Replace
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={(event) => {
+                            const file = event.target.files?.[0];
+                            if (file) handleReplaceImageForSelected(idx, file);
+                            event.target.value = '';
+                          }}
+                          style={{ display: 'none' }}
+                        />
+                      </label>
                       <button type="button" className="small" onClick={() => moveImage(idx, Math.max(0, idx - 1))} disabled={idx === 0}>←</button>
                       <button type="button" className="small" onClick={() => moveImage(idx, idx + 1)} disabled={idx === ((selectedProperty.images || []).length - 1)}>→</button>
                       <button type="button" className="small danger" onClick={() => handleDeleteImageForSelected(idx)}>Delete</button>

@@ -30,8 +30,15 @@ export const clearAdminAuthToken = () => {
 export const login = async (email, password) => {
   try {
     const response = await fetch(`${API_BASE}/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
-    if (!response.ok) return { success: false, message: 'Login failed' };
-    const json = await response.json();
+    const json = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      return {
+        success: false,
+        message: json?.message || 'Login failed',
+      };
+    }
+
     // support backend returning either { success:true, data: { token, user } }
     // or { success:true, token, user }
     const token = json?.data?.token || json?.token || null;
@@ -39,8 +46,12 @@ export const login = async (email, password) => {
     if (token) {
       setAdminAuthToken(token);
     }
-    // return a normalized shape
-    return { success: json.success, message: json.message, data: { token, user } };
+
+    return {
+      success: Boolean(json?.success),
+      message: json?.message || 'Login successful',
+      data: { token, user },
+    };
   } catch (error) {
     console.warn('Admin login error', error);
     return { success: false, message: 'Login error' };

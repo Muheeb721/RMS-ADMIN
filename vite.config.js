@@ -2,7 +2,7 @@ import { defineConfig } from 'vite'
 import react, { reactCompilerPreset } from '@vitejs/plugin-react'
 import babel from '@rolldown/plugin-babel'
 
-const backendTarget = process.env.VITE_API_URL || process.env.VITE_API_BASE_URL || 'http://localhost:5001'
+const backendTarget = process.env.VITE_API_URL || process.env.VITE_API_BASE_URL || 'http://localhost:5000'
 
 // https://vite.dev/config/
 export default defineConfig({
