@@ -2,13 +2,14 @@ import { useEffect, useState } from 'react';
 import { apiService } from '../services/api';
 import './AreasPage.css';
 
-export default function AreasPage({ appData, setAppData, notify }) {
+export default function AreasPage({ notify }) {
   const [areas, setAreas] = useState([]);
   const [form, setForm] = useState({ name: '', city: '', phase: '', displayOrder: 0, active: true });
 
   const load = async () => {
     try {
       const resp = await apiService.request('/areas');
+      if (!resp?.success) throw new Error(resp?.message || 'Unable to load areas.');
       setAreas(resp.data || []);
     } catch (e) {
       console.error('Load areas failed', e);
@@ -16,12 +17,15 @@ export default function AreasPage({ appData, setAppData, notify }) {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    Promise.resolve().then(load);
+  }, []);
 
   const handleCreate = async (e) => {
     e.preventDefault();
     try {
       const resp = await apiService.request('/areas', { method: 'POST', body: form });
+      if (!resp?.success || !resp.data) throw new Error(resp?.message || 'Area creation failed.');
       setAreas((prev) => [resp.data, ...prev]);
       setForm({ name: '', city: '', phase: '', displayOrder: 0, active: true });
       notify && notify({ message: 'Area added', variant: 'success' });
@@ -34,7 +38,8 @@ export default function AreasPage({ appData, setAppData, notify }) {
   const handleDelete = async (id) => {
     if (!window.confirm('Delete this area?')) return;
     try {
-      await apiService.request(`/areas/${id}`, { method: 'DELETE' });
+      const resp = await apiService.request(`/areas/${id}`, { method: 'DELETE' });
+      if (!resp?.success) throw new Error(resp?.message || 'Area deletion failed.');
       setAreas((prev) => prev.filter((a) => a._id !== id && a.id !== id));
       notify && notify({ message: 'Area deleted', variant: 'success' });
     } catch (err) {

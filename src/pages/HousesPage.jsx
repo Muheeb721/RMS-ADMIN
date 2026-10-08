@@ -2,14 +2,25 @@ import { useMemo, useState, useEffect } from 'react';
 import './HousesPage.css';
 import Modal from '../components/Modal';
 import { formatCurrency, formatDate } from '../utils/formatters';
-import { generateId } from '../services/localStorage';
 import { apiService } from '../services/api';
-import { createAdminProperty, deleteAdminProperty, updateAdminProperty } from '../services/adminPropertyService';
+import {
+  createAdminProperty,
+  deleteAdminProperty,
+  updateAdminProperty,
+  uploadPropertyImage,
+  replacePropertyImage,
+  deletePropertyImage,
+} from '../services/adminPropertyService';
+import AdminPropertySlider from '../components/AdminPropertySlider';
 
 const emptyForm = {
   title: '',
   propertyType: 'House',
   category: 'House',
+  type: 'House',
+  purpose: 'Rent',
+  transactionType: 'Rent',
+  listingType: 'rent',
   description: '',
   price: '',
   rent: '',
@@ -50,6 +61,7 @@ const BACKEND_BASE_URL = (import.meta.env.VITE_API_URL || import.meta.env.VITE_A
   .replace(/\/api\/?$/, '')
   .replace(/\/$/, '') || 'http://localhost:5000';
 const normalizeImageUrl = (value) => {
+  if (value && typeof value === 'object') value = value.url;
   if (!value || typeof value !== 'string') return HOUSE_DEFAULT_IMAGE;
   const trimmed = value.trim();
   if (!trimmed) return HOUSE_DEFAULT_IMAGE;
@@ -69,9 +81,19 @@ const getPropertyImageUrl = (property, index = 0) => {
   return deduped[index] || deduped[0] || fallback;
 };
 const getPropertyId = (property) => property?._id || property?.id || property?.propertyId || property?.mongoId;
+const isSaleListing = (property) => [
+  property?.listingType,
+  property?.transactionType,
+  property?.purpose,
+].some((value) => ['sale', 'sell', 'buy', 'purchase', 'for sale'].includes(String(value || '').trim().toLowerCase()));
 
 function HousesPage({ appData, setAppData, notify }) {
-  const properties = (appData.properties || []).filter((item) => item.propertyType === 'House' || item.category === 'House');
+  const properties = (appData.properties || []).filter((item) => {
+    const propertyType = String(item?.propertyType || '').trim().toLowerCase();
+    const category = String(item?.category || '').trim().toLowerCase();
+    const type = String(item?.type || '').trim().toLowerCase();
+    return !isSaleListing(item) && [propertyType, category, type].some((value) => ['house', 'houses', 'villa', 'villas'].includes(value));
+  });
 
   const refreshProperties = async () => {
     try {
@@ -92,6 +114,7 @@ function HousesPage({ appData, setAppData, notify }) {
   const [editingId, setEditingId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
   const [formData, setFormData] = useState(emptyForm);
+  const [selectedImageFile, setSelectedImageFile] = useState(null);
   const [errors, setErrors] = useState({});
 
   const filteredProperties = useMemo(() => {
@@ -113,6 +136,7 @@ function HousesPage({ appData, setAppData, notify }) {
   const openCreateModal = () => {
     setEditingId(null);
     setFormData(emptyForm);
+    setSelectedImageFile(null);
     setErrors({});
     setModalOpen(true);
   };
@@ -120,9 +144,7 @@ function HousesPage({ appData, setAppData, notify }) {
   useEffect(() => {
     const loadProperties = async () => {
       try {
-        const existing = (appData.properties || []).length;
-        if (existing) return;
-        const resp = await apiService.request('/admin/properties');
+        const resp = await apiService.request('/admin/properties?limit=1000');
         if (resp?.success) setAppData((prev) => ({ ...prev, properties: resp.data || [] }));
       } catch (e) {
         console.warn('Load properties failed', e);
@@ -171,6 +193,7 @@ function HousesPage({ appData, setAppData, notify }) {
   const handleImagePick = (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
+    setSelectedImageFile(file);
     const reader = new FileReader();
     reader.onload = () => {
       setFormData((prev) => ({ ...prev, image: String(reader.result || ''), images: [String(reader.result || '')] }));
@@ -224,14 +247,19 @@ function HousesPage({ appData, setAppData, notify }) {
       }
     }
 
+    const monthlyRent = Number(formData.price || 0);
     const payload = {
       title: formData.title.trim(),
       propertyType: 'House',
       category: 'House',
+      type: 'House',
+      purpose: 'Rent',
+      transactionType: 'Rent',
+      listingType: 'rent',
       description: formData.description.trim(),
-      price: Number(formData.price || 0),
-      rent: Number(formData.rent || 0),
-      salePrice: Number(formData.salePrice || formData.price || 0),
+      price: monthlyRent,
+      rent: monthlyRent,
+      salePrice: 0,
       deposit: Number(formData.deposit || 0),
       otherCharges: Number(formData.otherCharges || 0),
       location: formData.location.trim(),
@@ -246,19 +274,30 @@ function HousesPage({ appData, setAppData, notify }) {
       ownerName: formData.ownerName.trim(),
       ownerPhone: formData.ownerPhone.trim(),
       ownerEmail: formData.ownerEmail.trim(),
-      image: formData.image || HOUSE_DEFAULT_IMAGE,
-      images: Array.isArray(formData.images) && formData.images.length ? formData.images : [formData.image || HOUSE_DEFAULT_IMAGE],
       status: formData.status,
       createdAt: editingId ? previousProperty?.createdAt || new Date().toISOString() : new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       priceHistory: nextPriceHistory,
     };
+    if (!selectedImageFile) {
+      payload.image = previousProperty?.image || '';
+      payload.images = Array.isArray(previousProperty?.images) ? previousProperty.images : [];
+    }
 
     try {
       const saved = editingId
         ? await updateAdminProperty(editingId, payload)
         : await createAdminProperty(payload);
       const finalProperty = saved || payload;
+      const savedId = getPropertyId(finalProperty) || editingId;
+      if (selectedImageFile && savedId) {
+        const existingImages = Array.isArray(previousProperty?.images) ? previousProperty.images : [];
+        if (existingImages.length) {
+          await replacePropertyImage(savedId, 0, selectedImageFile);
+        } else {
+          await uploadPropertyImage(savedId, selectedImageFile);
+        }
+      }
 
       await refreshProperties();
 
@@ -284,6 +323,7 @@ function HousesPage({ appData, setAppData, notify }) {
       notify({ message: editingId ? 'House updated successfully.' : 'House added successfully.', variant: 'success' });
       setModalOpen(false);
       setEditingId(null);
+      setSelectedImageFile(null);
       setFormData(emptyForm);
     } catch (error) {
       console.error('House save failed:', error);
@@ -294,6 +334,12 @@ function HousesPage({ appData, setAppData, notify }) {
   const handleDelete = async (propertyId) => {
     try {
       await deleteAdminProperty(propertyId);
+      setAppData((previous) => ({
+        ...previous,
+        properties: (previous.properties || []).filter(
+          (item) => String(getPropertyId(item)) !== String(propertyId)
+        ),
+      }));
       await refreshProperties();
       addActivity('House deleted', 'A house was removed from the catalog.');
       notify({ message: 'House deleted successfully.', variant: 'success' });
@@ -304,86 +350,37 @@ function HousesPage({ appData, setAppData, notify }) {
     setDeletingId(null);
   };
 
-  const changeStatus = (propertyId, nextStatus) => {
-    (async () => {
-      try {
-        notify && notify({ message: 'Updating house status...', variant: 'info' });
-        const resp = await apiService.request(`/properties/${propertyId}/status`, { method: 'POST', body: { status: nextStatus } });
-        const updated = resp?.data || null;
-        if (updated) {
-          setAppData((prev) => ({ ...prev, properties: (prev.properties || []).map((item) => (String(getPropertyId(item)) === String(propertyId) ? { ...item, ...updated } : item)) }));
-        } else {
-          setAppData((prev) => ({ ...prev, properties: (prev.properties || []).map((item) => (String(getPropertyId(item)) === String(propertyId) ? { ...item, status: nextStatus, updatedAt: new Date().toISOString() } : item)) }));
-        }
-        await refreshProperties();
-        addActivity('House status changed', `A house status was updated to ${nextStatus}.`);
-        notify && notify({ message: `House status updated to ${nextStatus}.`, variant: 'success' });
-      } catch (e) {
-        console.error('Update status failed', e);
-        notify && notify({ message: e?.message || 'Unable to update house status.', variant: 'error' });
-      }
-    })();
-  };
+  const handleUploadImage = async (property, file) => {
+    const propertyId = getPropertyId(property);
+    if (!propertyId || !file) return;
 
-  const duplicateProperty = (property) => {
-    (async () => {
-      try {
-        notify && notify({ message: 'Duplicating house...', variant: 'info' });
-        const payload = { ...property };
-        delete payload._id;
-        delete payload.id;
-        payload.title = `${property.title} Copy`;
-        payload.propertyType = 'House';
-        payload.category = 'House';
-        payload.createdAt = new Date().toISOString();
-        payload.updatedAt = new Date().toISOString();
-        const saved = await createAdminProperty(payload);
-        const finalProperty = saved || { ...payload, _id: payload._id || generateId('prop') };
-        await refreshProperties();
-        setEditingId(getPropertyId(finalProperty) || null);
-        setFormData({
-          title: finalProperty.title || '',
-          propertyType: 'House',
-          category: 'House',
-          description: finalProperty.description || '',
-          price: finalProperty.price || '',
-          rent: finalProperty.rent || '',
-          salePrice: finalProperty.salePrice || '',
-          deposit: finalProperty.deposit || '',
-          otherCharges: finalProperty.otherCharges || '',
-          location: finalProperty.location || '',
-          city: finalProperty.city || '',
-          address: finalProperty.address || '',
-          bedrooms: finalProperty.bedrooms || '',
-          bathrooms: finalProperty.bathrooms || '',
-          area: finalProperty.area || '',
-          furnished: finalProperty.furnished || 'Fully Furnished',
-          floor: finalProperty.floor || '',
-          totalFloors: finalProperty.totalFloors || '',
-          ownerName: finalProperty.ownerName || '',
-          ownerPhone: finalProperty.ownerPhone || '',
-          ownerEmail: finalProperty.ownerEmail || '',
-          image: finalProperty.image || '',
-          status: finalProperty.status || 'Available',
-        });
-        setErrors({});
-        setModalOpen(true);
-        addActivity('House duplicated', `${property.title} was duplicated and opened for editing.`);
-        notify && notify({ message: 'House duplicated and opened for editing.', variant: 'success' });
-      } catch (e) {
-        console.error('Duplicate house failed', e);
-        notify && notify({ message: e?.message || 'Unable to duplicate house.', variant: 'error' });
+    try {
+      notify && notify({ message: 'Uploading image...', variant: 'info' });
+      const response = await uploadPropertyImage(propertyId, file);
+      const updatedProperty = response?.property;
+      if (updatedProperty) {
+        setAppData((previous) => ({
+          ...previous,
+          properties: (previous.properties || []).map((item) =>
+            String(getPropertyId(item)) === String(propertyId)
+              ? { ...item, ...updatedProperty }
+              : item
+          ),
+        }));
       }
-    })();
+      await refreshProperties();
+      notify && notify({ message: 'Image uploaded and saved.', variant: 'success' });
+    } catch (error) {
+      console.error('House image upload failed:', error);
+      notify && notify({ message: error?.message || 'Unable to upload house image.', variant: 'error' });
+    }
   };
 
   const handleReplaceImage = async (propertyId, index, file) => {
     if (!file) return;
-    const form = new FormData();
-    form.append('image', file);
     try {
       notify && notify({ message: 'Replacing image...', variant: 'info' });
-      await apiService.replacePropertyImage(propertyId, index, form);
+      await replacePropertyImage(propertyId, index, file);
       await refreshProperties();
       const resp = await apiService.getProperty(propertyId);
       if (resp?.success) setSelectedProperty(resp.data);
@@ -397,7 +394,21 @@ function HousesPage({ appData, setAppData, notify }) {
   const handleDeleteImage = async (propertyId, index) => {
     try {
       notify && notify({ message: 'Deleting image...', variant: 'info' });
-      await apiService.deletePropertyImage(propertyId, index);
+      const propertyResponse = await apiService.getProperty(propertyId);
+      const currentImages = Array.isArray(propertyResponse?.data?.images)
+        ? propertyResponse.data.images
+        : [];
+
+      if (index < 0 || index >= currentImages.length) {
+        notify && notify({
+          message: 'That image is no longer available. Refreshing the gallery.',
+          variant: 'info',
+        });
+        if (propertyResponse?.success) setSelectedProperty(propertyResponse.data);
+        return;
+      }
+
+      await deletePropertyImage(propertyId, index);
       await refreshProperties();
       const resp = await apiService.getProperty(propertyId);
       if (resp?.success) setSelectedProperty(resp.data);
@@ -440,71 +451,13 @@ function HousesPage({ appData, setAppData, notify }) {
           <h3>House Inventory</h3>
           <span className="mini-badge">{filteredProperties.length} houses</span>
         </div>
-
-        {filteredProperties.length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-icon">🏠</div>
-            <h4>No houses found</h4>
-            <p>Adjust filters or add a new house listing.</p>
-          </div>
-        ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Image</th>
-                  <th>House</th>
-                  <th>Location</th>
-                  <th>Price</th>
-                  <th>Owner</th>
-                  <th>Status</th>
-                  <th>Created</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredProperties.map((property, index) => (
-                  <tr key={getPropertyId(property) || property.id}>
-                    <td>
-                      <img
-                        src={getPropertyImageUrl(property, index)}
-                        alt={property.title || 'House'}
-                        className="property-thumb"
-                        onError={(event) => {
-                          event.currentTarget.onerror = null;
-                          event.currentTarget.src = HOUSE_DEFAULT_IMAGES[index % HOUSE_DEFAULT_IMAGES.length] || HOUSE_DEFAULT_IMAGE;
-                        }}
-                      />
-                    </td>
-                    <td>
-                      <strong>{property.title}</strong>
-                      <small>{property.city}</small>
-                    </td>
-                    <td>{property.location}</td>
-                    <td>{formatCurrency(property.price || property.salePrice || 0)}</td>
-                    <td>{property.ownerName}</td>
-                    <td>
-                      <select value={property.status} onChange={(event) => changeStatus(getPropertyId(property), event.target.value)} className="status-select">
-                        {statusOptions.map((status) => (
-                          <option key={status} value={status}>{status}</option>
-                        ))}
-                      </select>
-                    </td>
-                    <td>{formatDate(property.createdAt)}</td>
-                    <td>
-                      <div className="table-actions">
-                        <button type="button" className="table-button light" onClick={() => openEditModal(property)}>Edit</button>
-                        <button type="button" className="table-button light" onClick={() => { setSelectedProperty(property); setManageModalOpen(true); }}>Manage</button>
-                        <button type="button" className="table-button light" onClick={() => duplicateProperty(property)}>Copy & Edit</button>
-                        <button type="button" className="table-button danger" onClick={() => setDeletingId(getPropertyId(property))}>Delete</button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <AdminPropertySlider
+          properties={filteredProperties}
+          onEdit={openEditModal}
+          onUploadImage={handleUploadImage}
+          onReplaceImage={(property, file) => handleReplaceImage(getPropertyId(property), 0, file)}
+          onDelete={(property) => handleDelete(getPropertyId(property))}
+        />
       </section>
 
       <Modal
@@ -543,13 +496,9 @@ function HousesPage({ appData, setAppData, notify }) {
           <div className="section-title">Pricing</div>
           <div className="form-grid three-col">
             <label>
-              Sale price
+              Monthly rent
               <input type="number" name="price" value={formData.price} onChange={handleFieldChange} />
               {errors.price && <span className="field-error">{errors.price}</span>}
-            </label>
-            <label>
-              Rent price
-              <input type="number" name="rent" value={formData.rent} onChange={handleFieldChange} />
             </label>
             <label>
               Deposit
@@ -558,10 +507,6 @@ function HousesPage({ appData, setAppData, notify }) {
           </div>
 
           <div className="form-grid three-col">
-            <label>
-              Sale price 2
-              <input type="number" name="salePrice" value={formData.salePrice} onChange={handleFieldChange} />
-            </label>
             <label>
               Other charges
               <input type="number" name="otherCharges" value={formData.otherCharges} onChange={handleFieldChange} />
@@ -708,15 +653,35 @@ function HousesPage({ appData, setAppData, notify }) {
               <h5>Images</h5>
               <div className="image-gallery admin-gallery">
                 {(() => {
-                  const rawImages = Array.isArray(selectedProperty.images) ? selectedProperty.images.slice(0, 6) : [];
-                  const candidateValues = [];
-                  rawImages.forEach((it) => it && candidateValues.push(it));
-                  if (selectedProperty.image) candidateValues.push(selectedProperty.image);
-                  if (selectedProperty.mainImage) candidateValues.push(selectedProperty.mainImage);
-                  if (selectedProperty.coverImage) candidateValues.push(selectedProperty.coverImage);
-                  const deduped = [...new Set(candidateValues.map((item) => normalizeImageUrl(item)).filter(Boolean))];
-                  const slots = Array.from({ length: 3 }, (_, i) => deduped[i] || deduped[0] || HOUSE_DEFAULT_IMAGES[i % HOUSE_DEFAULT_IMAGES.length]);
-                  return slots.map((url, idx) => (
+                  const rawImages = Array.isArray(selectedProperty.images)
+                    ? selectedProperty.images.slice(0, 6)
+                    : [];
+
+                  if (!rawImages.length) {
+                    return (
+                      <div className="gallery-item gallery-item-empty">
+                        <p>No uploaded images.</p>
+                        <label className="btn small">
+                          Upload image
+                          <input
+                            type="file"
+                            accept="image/*"
+                            style={{ display: 'none' }}
+                            onChange={(e) => handleReplaceImage(
+                              getPropertyId(selectedProperty),
+                              0,
+                              e.target.files?.[0]
+                            )}
+                          />
+                        </label>
+                      </div>
+                    );
+                  }
+
+                  return rawImages.map((image, idx) => {
+                    const imageValue = typeof image === 'string' ? image : image?.url;
+                    const url = normalizeImageUrl(imageValue);
+                    return (
                     <div key={idx} className="gallery-item">
                       <img src={url} alt={`Image ${idx + 1}`} className="property-thumb" onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = HOUSE_DEFAULT_IMAGES[idx % HOUSE_DEFAULT_IMAGES.length]; }} />
                       <div className="gallery-actions">
@@ -727,7 +692,8 @@ function HousesPage({ appData, setAppData, notify }) {
                         <button type="button" className="btn small danger" onClick={() => handleDeleteImage(getPropertyId(selectedProperty), idx)}>Delete</button>
                       </div>
                     </div>
-                  ));
+                    );
+                  });
                 })()}
               </div>
             </div>

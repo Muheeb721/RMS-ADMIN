@@ -120,6 +120,14 @@
   border-radius: 10px;
 }
 
+.property-thumb-placeholder {
+  display: grid;
+  place-items: center;
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 0.75rem;
+}
+
 .properties-page .property-thumb.large {
   width: 96px;
   height: 96px;

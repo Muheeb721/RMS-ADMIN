@@ -14,6 +14,8 @@ import {
   replacePropertyImageById,
   deletePropertyImageById,
 } from '../services/adminPropertyService';
+import AdminPropertySlider from '../components/AdminPropertySlider';
+import { getAdminImageUrl } from '../utils/adminImageUrl';
 
 const emptyForm = {
   title: '',
@@ -26,6 +28,7 @@ const emptyForm = {
   deposit: '',
   otherCharges: '',
   location: '',
+  phase: '',
   city: '',
   address: '',
   bedrooms: '',
@@ -67,6 +70,7 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
   const [editingId, setEditingId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
   const [formData, setFormData] = useState(emptyForm);
+  const [selectedImageFiles, setSelectedImageFiles] = useState([]);
   const [errors, setErrors] = useState({});
 
   const filteredProperties = useMemo(() => {
@@ -104,6 +108,7 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
   const openCreateModal = () => {
     setEditingId(null);
     setFormData(emptyForm);
+    setSelectedImageFiles([]);
     setErrors({});
     setModalOpen(true);
   };
@@ -111,9 +116,7 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
   useEffect(() => {
     const loadProperties = async () => {
       try {
-        const existing = (appData.properties || []).length;
-        if (existing) return;
-        const resp = await apiService.request('/admin/properties');
+        const resp = await apiService.request('/admin/properties?limit=1000');
         if (resp?.success) setAppData((prev) => ({ ...prev, properties: resp.data || [] }));
       } catch (e) {
         console.warn('Load properties failed', e);
@@ -136,6 +139,7 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
       deposit: property.deposit || '',
       otherCharges: property.otherCharges || '',
       location: property.location || '',
+      phase: property.phase || '',
       city: property.city || '',
       address: property.address || '',
       bedrooms: property.bedrooms || '',
@@ -148,8 +152,10 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
       ownerPhone: property.ownerPhone || '',
       ownerEmail: property.ownerEmail || '',
       image: property.image || '',
+      images: Array.isArray(property.images) ? property.images : [],
       status: property.status || 'Available',
     });
+    setSelectedImageFiles([]);
     setErrors({});
     setModalOpen(true);
   };
@@ -160,13 +166,8 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
   };
 
   const handleImagePick = (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      setFormData((prev) => ({ ...prev, image: String(reader.result || ''), images: [String(reader.result || '')] }));
-    };
-    reader.readAsDataURL(file);
+    const files = Array.from(event.target.files || []);
+    setSelectedImageFiles(files);
   };
 
   const validate = () => {
@@ -219,13 +220,18 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
       title: formData.title.trim(),
       propertyType: formData.propertyType,
       category: formData.category || formData.propertyType,
+      type: formData.propertyType,
+      purpose: 'Rent',
+      transactionType: 'Rent',
+      listingType: 'rent',
       description: formData.description.trim(),
-      price: Number(formData.price || 0),
-      rent: Number(formData.rent || 0),
-      salePrice: Number(formData.salePrice || formData.price || 0),
+      price: Number(formData.rent || formData.price || 0),
+      rent: Number(formData.rent || formData.price || 0),
+      salePrice: 0,
       deposit: Number(formData.deposit || 0),
       otherCharges: Number(formData.otherCharges || 0),
       location: formData.location.trim(),
+      phase: formData.phase.trim(),
       city: formData.city.trim(),
       address: formData.address.trim(),
       bedrooms: Number(formData.bedrooms || 0),
@@ -237,8 +243,6 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
       ownerName: formData.ownerName.trim(),
       ownerPhone: formData.ownerPhone.trim(),
       ownerEmail: formData.ownerEmail.trim(),
-      image: formData.image || 'https://images.unsplash.com/photo-1568605114967-8130f3a36994?auto=format&fit=crop&w=900&q=80',
-      images: formData.images || [formData.image || 'https://images.unsplash.com/photo-1568605114967-8130f3a36994?auto=format&fit=crop&w=900&q=80'],
       status: formData.status,
       createdAt: editingId ? previousProperty?.createdAt || new Date().toISOString() : new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -248,9 +252,15 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
     try {
       const saved = editingId
         ? await updateAdminProperty(editingId, payload)
-        : await createAdminProperty(payload);
+        : await createAdminProperty(payload, selectedImageFiles);
 
       const finalProperty = saved || payload;
+      const savedId = getPropertyId(finalProperty) || editingId;
+      if (editingId && selectedImageFiles.length) {
+        for (const file of selectedImageFiles) {
+          await uploadPropertyImage(savedId, file);
+        }
+      }
 
       await refreshProperties();
 
@@ -277,6 +287,7 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
       setModalOpen(false);
       setEditingId(null);
       setFormData(emptyForm);
+      setSelectedImageFiles([]);
     } catch (error) {
       console.error('Admin property save failed:', error);
       notify({ message: error.message || 'Unable to save property.', variant: 'error' });
@@ -369,6 +380,7 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
 
   const handleUploadImageForSelected = async (event) => {
     const file = event.target.files?.[0];
+    event.target.value = '';
     if (!file || !selectedProperty) return;
 
     try {
@@ -551,7 +563,7 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
           <div className="toolbar-group">
             <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)}>
               <option value="All">All Types</option>
-              {['House', 'Apartment', 'Flat', 'Room', 'Hostel'].map((type) => (
+              {['House', 'Apartment', 'Flat'].map((type) => (
                 <option key={type} value={type}>{type}</option>
               ))}
             </select>
@@ -576,8 +588,9 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
           <h3>Property Inventory</h3>
           <span className="mini-badge">{filteredProperties.length} properties</span>
         </div>
+              <AdminPropertySlider properties={filteredProperties} onEdit={openEditModal} />
 
-        {filteredProperties.length === 0 ? (
+              {filteredProperties.length === 0 ? (
           <div className="empty-state">
             <div className="empty-icon">🏠</div>
             <h4>No properties found</h4>
@@ -603,7 +616,9 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
                 {filteredProperties.map((property) => (
                   <tr key={getPropertyId(property) || property.id}>
                     <td>
-                      <img src={property.image || (Array.isArray(property.images) && property.images[0] ? (typeof property.images[0] === 'string' ? property.images[0] : property.images[0].url) : 'https://images.unsplash.com/photo-1568605114967-8130f3a36994?auto=format&fit=crop&w=300&q=80')} alt={property.title} className="property-thumb" />
+                      {getAdminImageUrl(property.image || property.images?.[0]) ? (
+                        <img src={getAdminImageUrl(property.image || property.images?.[0])} alt={property.title} className="property-thumb" />
+                      ) : <div className="property-thumb property-thumb-placeholder">No image</div>}
                     </td>
                     <td>
                       <strong>{property.title}</strong>
@@ -656,9 +671,9 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
               {errors.title && <span className="field-error">{errors.title}</span>}
             </label>
             <label>
-              Property type
+              Rental category
               <select name="propertyType" value={formData.propertyType} onChange={handleFieldChange}>
-                {['House', 'Apartment', 'Flat', 'Room', 'Hostel'].map((type) => (
+                {['House', 'Apartment', 'Flat'].map((type) => (
                   <option key={type} value={type}>{type}</option>
                 ))}
               </select>
@@ -693,12 +708,12 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
           <div className="section-title">Pricing</div>
           <div className="form-grid three-col">
             <label>
-              Sale price
+              Monthly rent
               <input type="number" name="price" value={formData.price} onChange={handleFieldChange} />
               {errors.price && <span className="field-error">{errors.price}</span>}
             </label>
             <label>
-              Rent price
+              Monthly rent (optional override)
               <input type="number" name="rent" value={formData.rent} onChange={handleFieldChange} />
             </label>
             <label>
@@ -709,7 +724,7 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
 
           <div className="form-grid three-col">
             <label>
-              Sale price 2
+              Legacy sale price
               <input type="number" name="salePrice" value={formData.salePrice} onChange={handleFieldChange} />
             </label>
             <label>
@@ -766,6 +781,10 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
               <input name="location" value={formData.location} onChange={handleFieldChange} />
               {errors.location && <span className="field-error">{errors.location}</span>}
             </label>
+            <label>
+              Phase
+              <input name="phase" value={formData.phase} onChange={handleFieldChange} />
+            </label>
           </div>
           <label>
             Address
@@ -793,10 +812,18 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
 
           <div className="section-title">Images</div>
           <label>
-            Main image
-            <input type="file" accept="image/*" onChange={handleImagePick} />
+            Upload images (multiple)
+            <input type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={handleImagePick} />
           </label>
-          {formData.image && <img src={formData.image} alt="Preview" className="image-preview" />}
+          {Array.isArray(formData.images) && formData.images.length > 0 && (
+            <div className="property-image-preview-list">
+              {formData.images.map((image, index) => {
+                const src = getAdminImageUrl(image);
+                return src ? <img key={`${src}-${index}`} src={src} alt={`Current property image ${index + 1}`} className="image-preview" /> : null;
+              })}
+            </div>
+          )}
+          {selectedImageFiles.length > 0 && <small>{selectedImageFiles.length} new image(s) selected.</small>}
         </form>
       </Modal>
 
@@ -809,7 +836,7 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
         {selectedProperty && (
           <div className="manage-property-panel">
             <div className="detail-header">
-              <img src={selectedProperty.image} alt={selectedProperty.title} className="property-thumb large" />
+              <img src={getAdminImageUrl(selectedProperty.image || selectedProperty.images?.[0])} alt={selectedProperty.title} className="property-thumb large" />
               <div>
                 <h4>{selectedProperty.title}</h4>
                 <p>{selectedProperty.propertyType} • {selectedProperty.location}</p>
@@ -867,7 +894,10 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
               <div className="images-list">
                 {(selectedProperty.images || (selectedProperty.image ? [selectedProperty.image] : [])).map((img, idx) => (
                   <div className="image-item" key={`${String(selectedProperty.id||selectedProperty._id)}-${idx}`}>
-                    <img src={img} alt={`img-${idx}`} />
+                    <img
+                      src={getAdminImageUrl(img)}
+                      alt={`img-${idx}`}
+                    />
                     <div className="image-controls">
                       <label className="small file-label" style={{ display: 'inline-flex', cursor: 'pointer' }}>
                         Replace

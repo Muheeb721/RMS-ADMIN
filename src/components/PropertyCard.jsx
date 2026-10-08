@@ -1,8 +1,6 @@
-import React from 'react';
 import './PropertyCard.css';
 
 export default function PropertyCard({ property, onUpdate, onReplaceImage }) {
-  const id = property._id || property.id || property.propertyId;
   const image = Array.isArray(property.images) && property.images.length ? (typeof property.images[0] === 'string' ? property.images[0] : property.images[0].url) : (property.image || 'https://images.unsplash.com/photo-1568605114967-8130f3a36994?auto=format&fit=crop&w=300&q=80');
 
   return (

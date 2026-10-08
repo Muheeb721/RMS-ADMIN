@@ -5,6 +5,11 @@ import { apiService } from '../services/api';
 function ReviewsPage({ appData, setAppData, notify }) {
   const [reviews, setReviews] = useState(appData.reviews || []);
   const [loading, setLoading] = useState(false);
+  const [showRatingFilter, setShowRatingFilter] = useState(false);
+  const [ratingFilter, setRatingFilter] = useState('All');
+  const visibleReviews = ratingFilter === 'All'
+    ? reviews
+    : reviews.filter((review) => String(Number(review.rating || 0)) === ratingFilter);
 
   useEffect(() => {
     const load = async () => {
@@ -32,11 +37,32 @@ function ReviewsPage({ appData, setAppData, notify }) {
       <section className="panel-card">
         <div className="card-header">
           <h3>Customer Reviews</h3>
-          <button className="mini-button">Filter</button>
+          <div className="toolbar-group">
+            {showRatingFilter && (
+              <select
+                aria-label="Filter reviews by rating"
+                value={ratingFilter}
+                onChange={(event) => setRatingFilter(event.target.value)}
+              >
+                <option value="All">All ratings</option>
+                {[5, 4, 3, 2, 1].map((rating) => (
+                  <option key={rating} value={String(rating)}>{rating} stars</option>
+                ))}
+              </select>
+            )}
+            <button
+              type="button"
+              className="mini-button"
+              aria-expanded={showRatingFilter}
+              onClick={() => setShowRatingFilter((current) => !current)}
+            >
+              Filter
+            </button>
+          </div>
         </div>
         <div className="list-stack large">
           {(!loading && reviews.length === 0) && <div className="empty">No reviews</div>}
-          {reviews.map((review) => (
+          {visibleReviews.map((review) => (
             <div key={review._id || review.id} className="review-item">
               <div className="review-header">
                 <strong>{review.userName || review.user || 'Anonymous'}</strong>

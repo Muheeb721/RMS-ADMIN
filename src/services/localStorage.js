@@ -16,7 +16,6 @@ export const STORAGE_KEYS = {
 };
 
 export const AUTH_KEY = 'rms_admin_auth';
-export const LOGIN_CREDENTIALS_KEY = 'rms_admin_login_credentials';
 
 export const generateId = (prefix = 'id') => {
   const randomPart = Math.random().toString(36).slice(2, 8);
@@ -59,7 +58,6 @@ export const calculateRentStatus = (record, settings = {}) => {
   const due = record.dueDate ? new Date(record.dueDate) : null;
   const rent = Number(record.amount || record.monthlyRent || 0);
   const paid = Number(record.paidAmount || 0);
-  const remaining = Math.max(rent - paid, 0);
 
   if (paid >= rent) return 'Paid';
   if (paid > 0 && paid < rent) return 'Partial';
@@ -106,7 +104,7 @@ export const buildDefaultState = () => ({
   admin: {
     fullName: 'Ayesha Khan',
     name: 'Ayesha Khan',
-    email: 'admin@rms.com',
+    email: 'muheebshahid75@gmail.com',
     phone: '+92 300 1234567',
     role: 'Super Administrator',
     profileImage: '',
@@ -462,7 +460,7 @@ export const buildDefaultState = () => ({
   },
   profile: {
     fullName: 'Ayesha Khan',
-    email: 'admin@rms.com',
+    email: 'muheebshahid75@gmail.com',
     phone: '+92 300 1234567',
     profileImage: '',
     role: 'Super Administrator',
@@ -513,7 +511,7 @@ export const loadAppData = () => {
       nextState.profile = { ...nextState.profile, ...profileData };
       nextState.admin = { ...nextState.admin, ...profileData };
     }
-  } catch (e) {
+  } catch {
     // ignore malformed profile in localStorage
   }
 
@@ -570,14 +568,9 @@ export const clearAuthState = () => {
   delete window.__rms_inmemory_token;
 };
 
-export const saveLoginCredentials = (email, password) => {
-  if (typeof window === 'undefined') return;
-  window.localStorage.setItem(LOGIN_CREDENTIALS_KEY, JSON.stringify({ email, password }));
-};
-
 export const clearLoginCredentials = () => {
   if (typeof window === 'undefined') return;
-  window.localStorage.removeItem(LOGIN_CREDENTIALS_KEY);
+  window.localStorage.removeItem('rms_admin_login_credentials');
 };
 
 export const clearAllAppStorage = () => {
@@ -588,7 +581,7 @@ export const clearAllAppStorage = () => {
   });
 
   window.localStorage.removeItem(AUTH_KEY);
-  window.localStorage.removeItem(LOGIN_CREDENTIALS_KEY);
+  window.localStorage.removeItem('rms_admin_login_credentials');
   window.localStorage.removeItem('rms_admin_token');
   window.localStorage.removeItem('rms_token');
   delete window.__RMS_AUTH_TOKEN;

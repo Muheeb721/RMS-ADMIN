@@ -6,8 +6,8 @@ function AnnouncementsPage({ appState, setAppState, notify }) {
   const notificationFeed = appState?.notifications || [];
 
   const announcements = useMemo(() => {
-    const directAnnouncements = (appState?.announcements || []).map((item) => ({
-      id: item.id || item._id || `announcement-${Date.now()}-${Math.random()}`,
+    const directAnnouncements = (appState?.announcements || []).map((item, index) => ({
+      id: item.id || item._id || `announcement-${index}`,
       title: item.title || 'Announcement',
       audience: item.audience || 'All occupants',
       priority: item.priority || item.status || 'Medium',
@@ -18,8 +18,8 @@ function AnnouncementsPage({ appState, setAppState, notify }) {
 
     const liveAnnouncements = notificationFeed
       .filter((item) => item?.actionType === 'ANNOUNCEMENT' || item?.entityType === 'GENERAL' || /announcement/i.test(item?.title || item?.message || ''))
-      .map((item) => ({
-        id: item.id || item._id || `live-announcement-${Date.now()}-${Math.random()}`,
+      .map((item, index) => ({
+        id: item.id || item._id || `live-announcement-${index}`,
         title: item.title || 'Announcement',
         audience: item.audience || 'All occupants',
         priority: item.priority || item.status || 'Medium',
@@ -81,6 +81,9 @@ function AnnouncementsPage({ appState, setAppState, notify }) {
 
       let recipients = [];
       const usersResponse = await apiService.request('/admin/users');
+      if (!usersResponse?.success) {
+        throw new Error(usersResponse?.message || 'Unable to load announcement recipients.');
+      }
       const allUsers = usersResponse?.data || [];
 
       if (form.audience === 'All occupants') {
@@ -90,11 +93,16 @@ function AnnouncementsPage({ appState, setAppState, notify }) {
       } else if (form.audience === 'Landlords') {
         recipients = allUsers.filter((user) => ['landlord', 'owner'].includes(String(user.role || '').toLowerCase()));
       }
+      if (!recipients.length) throw new Error('No recipients were found for this audience.');
 
       const created = [];
+      let failedCount = 0;
       for (const user of recipients) {
         const userId = user?._id || user?.id;
-        if (!userId) continue;
+        if (!userId) {
+          failedCount += 1;
+          continue;
+        }
         try {
           const note = await apiService.request('/notifications/create', {
             method: 'POST',
@@ -104,11 +112,14 @@ function AnnouncementsPage({ appState, setAppState, notify }) {
               userName: user.name || user.email || 'User',
             },
           });
-          if (note?.data) created.push(note.data);
+          if (note?.success && note.data) created.push(note.data);
+          else failedCount += 1;
         } catch (err) {
           console.warn('Failed to create announcement notification', userId, err);
+          failedCount += 1;
         }
       }
+      if (!created.length) throw new Error('Announcement was not delivered to any recipients.');
 
       const announcement = {
         id: Date.now(),
@@ -116,7 +127,7 @@ function AnnouncementsPage({ appState, setAppState, notify }) {
         audience: form.audience,
         priority: form.priority || 'Medium',
         content: form.content.trim(),
-        createdCount: created.length || recipients.length || 0,
+        createdCount: created.length,
         createdAt: new Date().toISOString(),
       };
 
@@ -138,16 +149,16 @@ function AnnouncementsPage({ appState, setAppState, notify }) {
         ].slice(0, 30),
       }));
 
-      notify?.({ message: `Announcement sent to ${created.length || recipients.length || 0} recipient(s).`, variant: 'success' });
+      notify?.({
+        message: failedCount
+          ? `Announcement sent to ${created.length} recipient(s); ${failedCount} failed.`
+          : `Announcement sent to ${created.length} recipient(s).`,
+        variant: failedCount ? 'warning' : 'success',
+      });
       setForm({ title: '', audience: 'All occupants', priority: 'Medium', content: '' });
     } catch (error) {
       console.error('Announcement publish failed', error);
-      setAppState((prev) => ({
-        ...prev,
-        announcements: [{ id: Date.now(), ...form, content: form.content.trim(), createdCount: 0, createdAt: new Date().toISOString() }, ...(prev.announcements || [])],
-      }));
       notify?.({ message: error?.message || 'Unable to publish announcement.', variant: 'error' });
-      setForm({ title: '', audience: 'All occupants', priority: 'Medium', content: '' });
     }
   };
 

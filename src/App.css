@@ -101,6 +101,82 @@ button:disabled {
   border-color: rgba(127, 29, 29, 0.2);
 }
 
+#root :is(
+  button,
+  .ant-btn,
+  .primary-button,
+  .outline-button,
+  .mini-button,
+  .table-button,
+  .header-icon-button,
+  .add-button,
+  .action-button,
+  .icon-button,
+  .filter-button,
+  .status-button,
+  [role="button"],
+  input[type="button"],
+  input[type="submit"],
+  input[type="reset"]
+) {
+  background: #ffe3e3 !important;
+  border: 1px solid #f2bcbc !important;
+  border-radius: 10px !important;
+  color: #171717 !important;
+  cursor: pointer;
+  font-weight: 600;
+  min-height: 38px;
+  padding: 8px 14px;
+  transition: background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+#root :is(
+  button,
+  .ant-btn,
+  .primary-button,
+  .outline-button,
+  .mini-button,
+  .table-button,
+  .header-icon-button,
+  .add-button,
+  .action-button,
+  .icon-button,
+  .filter-button,
+  .status-button,
+  [role="button"],
+  input[type="button"],
+  input[type="submit"],
+  input[type="reset"]
+):not(:disabled):hover {
+  background: #ffcaca !important;
+  border-color: #eaa0a0 !important;
+  color: #111111 !important;
+  cursor: pointer;
+}
+
+#root :is(button, .ant-btn, input[type="button"], input[type="submit"], input[type="reset"]):disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+#root :is(
+  button,
+  .ant-btn,
+  .primary-button,
+  .outline-button,
+  .mini-button,
+  .table-button,
+  .header-icon-button,
+  .add-button,
+  .action-button,
+  .icon-button,
+  .filter-button,
+  .status-button,
+  [role="button"]
+) :is(span, strong, b, em, i) {
+  color: inherit !important;
+}
+
 .full-width {
   width: 100%;
 }

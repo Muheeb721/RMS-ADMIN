@@ -112,7 +112,7 @@ function ImageManagementPage({ notify }) {
   };
 
   useEffect(() => {
-    loadImages();
+    Promise.resolve().then(loadImages);
   }, []);
 
   const resetForm = () => {

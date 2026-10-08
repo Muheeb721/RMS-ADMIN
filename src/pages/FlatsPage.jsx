@@ -4,12 +4,17 @@ import Modal from '../components/Modal';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import { generateId } from '../services/localStorage';
 import { apiService } from '../services/api';
-import { createAdminProperty, deleteAdminProperty, updateAdminProperty } from '../services/adminPropertyService';
+import { createAdminProperty, deleteAdminProperty, updateAdminProperty, uploadPropertyImage, replacePropertyImage } from '../services/adminPropertyService';
+import AdminPropertySlider from '../components/AdminPropertySlider';
 
 const emptyForm = {
   title: '',
   propertyType: 'Flat',
   category: 'Flat',
+  type: 'Flat',
+  purpose: 'Rent',
+  transactionType: 'Rent',
+  listingType: 'rent',
   description: '',
   price: '',
   rent: '',
@@ -50,6 +55,7 @@ const BACKEND_BASE_URL = (import.meta.env.VITE_API_URL || import.meta.env.VITE_A
   .replace(/\/api\/?$/, '')
   .replace(/\/$/, '') || 'http://localhost:5000';
 const normalizeImageUrl = (value) => {
+  if (value && typeof value === 'object') value = value.url;
   if (!value || typeof value !== 'string') return FLAT_DEFAULT_IMAGE;
   const trimmed = value.trim();
   if (!trimmed) return FLAT_DEFAULT_IMAGE;
@@ -69,9 +75,18 @@ const getPropertyImageUrl = (property, index = 0) => {
   return deduped[index] || deduped[0] || fallback;
 };
 const getPropertyId = (property) => property?._id || property?.id || property?.propertyId || property?.mongoId;
+const isSaleListing = (property) => [
+  property?.listingType,
+  property?.transactionType,
+  property?.purpose,
+].some((value) => ['sale', 'sell', 'buy', 'purchase', 'for sale'].includes(String(value || '').trim().toLowerCase()));
 
 function FlatsPage({ appData, setAppData, notify }) {
-  const properties = (appData.properties || []).filter((item) => item.propertyType === 'Flat' || item.category === 'Flat');
+  const properties = (appData.properties || []).filter((item) => (
+    !isSaleListing(item)
+    && [item.propertyType, item.type, item.category]
+      .some((value) => ['flat', 'flats', 'studio', 'studios'].includes(String(value || '').trim().toLowerCase()))
+  ));
 
   const refreshProperties = async () => {
     try {
@@ -92,6 +107,7 @@ function FlatsPage({ appData, setAppData, notify }) {
   const [editingId, setEditingId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
   const [formData, setFormData] = useState(emptyForm);
+  const [selectedImageFile, setSelectedImageFile] = useState(null);
   const [errors, setErrors] = useState({});
 
   const filteredProperties = useMemo(() => {
@@ -113,6 +129,7 @@ function FlatsPage({ appData, setAppData, notify }) {
   const openCreateModal = () => {
     setEditingId(null);
     setFormData(emptyForm);
+    setSelectedImageFile(null);
     setErrors({});
     setModalOpen(true);
   };
@@ -120,9 +137,7 @@ function FlatsPage({ appData, setAppData, notify }) {
   useEffect(() => {
     const loadProperties = async () => {
       try {
-        const existing = (appData.properties || []).length;
-        if (existing) return;
-        const resp = await apiService.request('/admin/properties');
+        const resp = await apiService.request('/admin/properties?limit=1000');
         if (resp?.success) setAppData((prev) => ({ ...prev, properties: resp.data || [] }));
       } catch (e) {
         console.warn('Load properties failed', e);
@@ -171,6 +186,7 @@ function FlatsPage({ appData, setAppData, notify }) {
   const handleImagePick = (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
+    setSelectedImageFile(file);
     const reader = new FileReader();
     reader.onload = () => {
       setFormData((prev) => ({ ...prev, image: String(reader.result || ''), images: [String(reader.result || '')] }));
@@ -224,14 +240,19 @@ function FlatsPage({ appData, setAppData, notify }) {
       }
     }
 
+    const monthlyRent = Number(formData.price || 0);
     const payload = {
       title: formData.title.trim(),
       propertyType: 'Flat',
       category: 'Flat',
+      type: 'Flat',
+      purpose: 'Rent',
+      transactionType: 'Rent',
+      listingType: 'rent',
       description: formData.description.trim(),
-      price: Number(formData.price || 0),
-      rent: Number(formData.rent || 0),
-      salePrice: Number(formData.salePrice || formData.price || 0),
+      price: monthlyRent,
+      rent: monthlyRent,
+      salePrice: 0,
       deposit: Number(formData.deposit || 0),
       otherCharges: Number(formData.otherCharges || 0),
       location: formData.location.trim(),
@@ -246,19 +267,26 @@ function FlatsPage({ appData, setAppData, notify }) {
       ownerName: formData.ownerName.trim(),
       ownerPhone: formData.ownerPhone.trim(),
       ownerEmail: formData.ownerEmail.trim(),
-      image: formData.image || FLAT_DEFAULT_IMAGE,
-      images: Array.isArray(formData.images) && formData.images.length ? formData.images : [formData.image || FLAT_DEFAULT_IMAGE],
       status: formData.status,
       createdAt: editingId ? previousProperty?.createdAt || new Date().toISOString() : new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       priceHistory: nextPriceHistory,
     };
+    if (!selectedImageFile) {
+      payload.image = previousProperty?.image || '';
+      payload.images = Array.isArray(previousProperty?.images) ? previousProperty.images : [];
+    }
 
     try {
       const saved = editingId
         ? await updateAdminProperty(editingId, payload)
         : await createAdminProperty(payload);
       const finalProperty = saved || payload;
+      const savedId = getPropertyId(finalProperty) || editingId;
+      if (selectedImageFile && savedId) {
+        if (Array.isArray(previousProperty?.images) && previousProperty.images.length) await replacePropertyImage(savedId, 0, selectedImageFile);
+        else await uploadPropertyImage(savedId, selectedImageFile);
+      }
 
       await refreshProperties();
 
@@ -283,6 +311,7 @@ function FlatsPage({ appData, setAppData, notify }) {
       addActivity(editingId ? 'Flat edited' : 'Flat added', `${finalProperty.title || payload.title} was ${editingId ? 'updated' : 'added'} to the flat catalog.`);
       notify({ message: editingId ? 'Flat updated successfully.' : 'Flat added successfully.', variant: 'success' });
       setModalOpen(false);
+      setSelectedImageFile(null);
       setEditingId(null);
       setFormData(emptyForm);
     } catch (error) {
@@ -440,6 +469,12 @@ function FlatsPage({ appData, setAppData, notify }) {
           <h3>Flat Inventory</h3>
           <span className="mini-badge">{filteredProperties.length} flats</span>
         </div>
+        <AdminPropertySlider
+          properties={filteredProperties}
+          onEdit={openEditModal}
+          onReplaceImage={(property, file) => handleReplaceImage(getPropertyId(property), 0, file)}
+          onDelete={(property) => handleDelete(getPropertyId(property))}
+        />
 
         {filteredProperties.length === 0 ? (
           <div className="empty-state">
@@ -543,13 +578,9 @@ function FlatsPage({ appData, setAppData, notify }) {
           <div className="section-title">Pricing</div>
           <div className="form-grid three-col">
             <label>
-              Sale price
+              Monthly rent
               <input type="number" name="price" value={formData.price} onChange={handleFieldChange} />
               {errors.price && <span className="field-error">{errors.price}</span>}
-            </label>
-            <label>
-              Rent price
-              <input type="number" name="rent" value={formData.rent} onChange={handleFieldChange} />
             </label>
             <label>
               Deposit
@@ -558,10 +589,6 @@ function FlatsPage({ appData, setAppData, notify }) {
           </div>
 
           <div className="form-grid three-col">
-            <label>
-              Sale price 2
-              <input type="number" name="salePrice" value={formData.salePrice} onChange={handleFieldChange} />
-            </label>
             <label>
               Other charges
               <input type="number" name="otherCharges" value={formData.otherCharges} onChange={handleFieldChange} />

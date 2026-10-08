@@ -17,6 +17,17 @@
   border-bottom: none;
 }
 
+.settings-page .setting-row > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-page .setting-description {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
 .settings-page .switch {
   position: relative;
   display: inline-block;
@@ -28,6 +39,12 @@
   opacity: 0;
   width: 0;
   height: 0;
+  position: absolute;
+}
+
+.settings-page .switch:focus-within .slider {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
 }
 
 .settings-page .slider {

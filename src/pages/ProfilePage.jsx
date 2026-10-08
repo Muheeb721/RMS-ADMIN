@@ -3,6 +3,15 @@ import { apiService } from '../services/api';
 import { useNavigate } from 'react-router-dom';
 import './ProfilePage.css';
 
+const defaultProfile = {
+  fullName: 'Ayesha Khan',
+  name: 'Ayesha Khan',
+  email: 'muheebshahid75@gmail.com',
+  phone: '+92 300 1234567',
+  role: 'Super Administrator',
+  profileImage: '',
+};
+
 const emptyProfile = () => ({
   fullName: '',
   name: '',
@@ -15,16 +24,7 @@ const emptyProfile = () => ({
 function ProfilePage({ appData, setAppData, notify }) {
   const navigate = useNavigate();
 
-  const defaultProfile = {
-    fullName: 'Ayesha Khan',
-    name: 'Ayesha Khan',
-    email: 'admin@rms.com',
-    phone: '+92 300 1234567',
-    role: 'Super Administrator',
-    profileImage: '',
-  };
-
-  const savedProfile = useMemo(() => appData.profile || appData.admin || defaultProfile, [appData, defaultProfile]);
+  const savedProfile = useMemo(() => appData.profile || appData.admin || defaultProfile, [appData.profile, appData.admin]);
   const [form, setForm] = useState(emptyProfile());
   const [profileImageFile, setProfileImageFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState('');
@@ -40,9 +40,11 @@ function ProfilePage({ appData, setAppData, notify }) {
       profileImage: savedProfile.profileImage || savedProfile.image || '',
     };
 
-    setForm(next);
-    setPreviewUrl(next.profileImage || '');
-    setProfileImageFile(null);
+    Promise.resolve().then(() => {
+      setForm(next);
+      setPreviewUrl(next.profileImage || '');
+      setProfileImageFile(null);
+    });
   }, [savedProfile]);
 
   const handleImageChange = (event) => {

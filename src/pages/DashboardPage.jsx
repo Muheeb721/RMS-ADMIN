@@ -12,6 +12,7 @@ function DashboardPage({ appData, setAppData }) {
   const users = appData.users || [];
   const tenants = appData.tenants || [];
   const activityLogs = appData.activityLogs || [];
+  const adminName = appData.profile?.fullName || appData.profile?.name || appData.admin?.fullName || appData.admin?.name || 'Admin';
 
   const normalizeValue = (value) => String(value ?? '').trim().toLowerCase();
   const matchesAnyStatus = (value, statuses = []) => statuses.some((status) => normalizeValue(value) === normalizeValue(status));
@@ -49,18 +50,6 @@ function DashboardPage({ appData, setAppData }) {
     };
   }, [properties, payments, dues, users, bookings, tenants, appData.maintenanceItems]);
 
-  const rentStats = useMemo(() => {
-    const rentRecords = appData.rentRecords || [];
-    const rentPayments = appData.rentPayments || [];
-    const totalMonthly = rentRecords.reduce((s, r) => s + Number(r.monthlyRent || r.amount || 0), 0);
-    const collectedThisMonth = rentPayments
-      .filter((p) => p.date && new Date(p.date).getMonth() === new Date().getMonth())
-      .reduce((s, p) => s + Number(p.amount || 0), 0);
-    const pending = rentRecords.filter((r) => ['due', 'pending', 'partial', 'upcoming'].includes(String(r.status || '').toLowerCase())).reduce((s, r) => s + Number(r.remainingAmount || r.amount || 0), 0);
-    const overdue = rentRecords.filter((r) => String(r.status || '').toLowerCase() === 'overdue').reduce((s, r) => s + Number(r.remainingAmount || r.amount || 0), 0);
-    return { totalMonthly, collectedThisMonth, pending, overdue };
-  }, [appData]);
-
   const cards = [
     { label: 'Total Users', value: stats.totalUsers, icon: '👥', tone: 'primary' },
     { label: 'Active Tenants', value: stats.activeTenants, icon: '🏠', tone: 'success' },
@@ -87,7 +76,6 @@ function DashboardPage({ appData, setAppData }) {
     .sort((a, b) => new Date(b.paymentDate || b.date || 0) - new Date(a.paymentDate || a.date || 0))
     .slice(0, 5);
 
-  const getActivityKey = (item, index) => item?.id || item?._id || `${item?.action || 'activity'}-${item?.timestamp || 'unknown'}-${index}`;
   const maxStatusValue = Math.max(...statusBreakdown.map((item) => item.value), 1);
 
   useEffect(() => {
@@ -133,7 +121,7 @@ function DashboardPage({ appData, setAppData }) {
       <section className="welcome-card panel-card">
         <div>
           <p className="eyebrow">Overview</p>
-          <h2>Welcome back, Admin 👋</h2>
+          <h2>Welcome back, {adminName} 👋</h2>
         </div>
         <div className="date-pill">{formatDate(new Date().toISOString())}</div>
       </section>

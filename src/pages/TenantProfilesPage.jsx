@@ -3,7 +3,7 @@ import { listAdminRentalProfiles, changeAdminRentalStatus } from '../services/ad
 import { useNavigate } from 'react-router-dom';
 import './TenantProfilesPage.css';
 
-function TenantProfilesPage({ appData, setAppData, notify }) {
+function TenantProfilesPage({ notify }) {
   const [profiles, setProfiles] = useState([]);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
@@ -20,7 +20,9 @@ function TenantProfilesPage({ appData, setAppData, notify }) {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    Promise.resolve().then(load);
+  }, []);
 
   const handleApprove = async (id) => {
     try {

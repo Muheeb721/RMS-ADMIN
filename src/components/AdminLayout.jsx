@@ -1,7 +1,9 @@
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useRef, useState, useEffect } from 'react';
+import { io } from 'socket.io-client';
 import { approveAdminBooking, rejectAdminBooking } from '../services/adminBookingService';
-import { apiService } from '../services/api';
+import { apiConfig, apiService } from '../services/api';
+import { getAdminImageUrl } from '../utils/adminImageUrl';
 import './AdminLayout.css';
 import DashboardPage from '../pages/DashboardPage';
 import AdminHomePage from '../pages/AdminHomePage';
@@ -54,60 +56,10 @@ function AdminLayout({ appData, setAppData, onLogout, notify }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [globalSearch, setGlobalSearch] = useState('');
-  const [searchResults, setSearchResults] = useState([]);
-
-  const unreadCount = useMemo(
-    () => (appData?.notifications || []).filter((item) => !item.read).length,
-    [appData.notifications],
-  );
-
-  const adminName = appData.profile?.fullName || appData.admin?.fullName || appData.admin?.name || 'Admin';
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const syncAdminNotifications = async () => {
-      try {
-        const response = await apiService.request('/notifications/admin/all');
-        if (!response?.success || !Array.isArray(response.data)) return;
-
-        const nextNotifications = response.data.map((item, index) => ({
-          ...item,
-          id: item._id || item.id || `notif-${index + 1}`,
-          _id: item._id || item.id || `notif-${index + 1}`,
-          title: item.title || item.actionType || 'Notification',
-          message: item.message || item.detail || '',
-          detail: item.message || item.detail || '',
-          read: item.isRead ?? item.read ?? false,
-          time: item.time || (item.createdAt ? new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Just now'),
-        }));
-
-        if (!cancelled) {
-          setAppData((prev) => ({
-            ...prev,
-            notifications: nextNotifications,
-          }));
-        }
-      } catch (error) {
-        console.warn('Unable to sync admin notifications from backend:', error?.message || error);
-      }
-    };
-
-    syncAdminNotifications();
-    const timer = window.setInterval(syncAdminNotifications, 15000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [setAppData]);
-
-  useEffect(() => {
+  const autoApprovingBookingIds = useRef(new Set());
+  const searchResults = useMemo(() => {
     const term = globalSearch.trim().toLowerCase();
-    if (!term) {
-      setSearchResults([]);
-      return undefined;
-    }
+    if (!term) return [];
 
     const matches = [];
     const addMatches = (items, type, route) => {
@@ -150,13 +102,140 @@ function AdminLayout({ appData, setAppData, onLogout, notify }) {
     addMatches(appData?.tenants || [], 'Tenant', '/admin/tenant-profiles');
     addMatches(appData?.payments || [], 'Payment', '/admin/payments');
 
-    setSearchResults(matches.slice(0, 6));
-    return undefined;
+    return matches.slice(0, 6);
   }, [appData, globalSearch]);
+
+  const unreadCount = useMemo(
+    () => (appData?.notifications || []).filter((item) => !item.read).length,
+    [appData.notifications],
+  );
+
+  const settings = appData.settings || {};
+  const darkMode = settings.darkMode ?? false;
+  const notificationsEnabled = settings.notifications ?? true;
+  const adminName = appData.profile?.fullName || appData.admin?.fullName || appData.admin?.name || 'Admin';
+  const adminImage = getAdminImageUrl(appData.profile?.profileImage || appData.admin?.profileImage);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const syncAdminNotifications = async () => {
+      try {
+        const response = await apiService.request('/notifications/admin/all');
+        if (!response?.success || !Array.isArray(response.data)) return;
+
+        const nextNotifications = response.data.map((item, index) => ({
+          ...item,
+          id: item._id || item.id || `notif-${index + 1}`,
+          _id: item._id || item.id || `notif-${index + 1}`,
+          title: item.title || item.actionType || 'Notification',
+          message: item.message || item.detail || '',
+          detail: item.message || item.detail || '',
+          read: item.isRead ?? item.read ?? false,
+          time: item.time || (item.createdAt ? new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Just now'),
+        }));
+
+        if (!cancelled) {
+          setAppData((prev) => ({
+            ...prev,
+            notifications: nextNotifications,
+          }));
+        }
+      } catch (error) {
+        console.warn('Unable to sync admin notifications from backend:', error?.message || error);
+      }
+    };
+
+    syncAdminNotifications();
+    const timer = window.setInterval(syncAdminNotifications, 15000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [setAppData]);
+
+  useEffect(() => {
+    const token = window.localStorage.getItem('rms_admin_token') || window.localStorage.getItem('rms_token');
+    if (!token) return undefined;
+
+    const autoApproveNewBooking = async (notification) => {
+      if (!settings.autoApprove || notification?.actionType !== 'BOOKING_SUBMITTED') return;
+
+      const bookingId = String(notification.metadata?.bookingId || notification.entityId || '');
+      if (!bookingId || autoApprovingBookingIds.current.has(bookingId)) return;
+
+      autoApprovingBookingIds.current.add(bookingId);
+      try {
+        const approvedBooking = await approveAdminBooking(bookingId);
+        setAppData((prev) => {
+          const found = (prev.bookings || []).some((booking) => String(booking._id || booking.id) === bookingId);
+          const updatedBookings = (prev.bookings || []).map((booking) =>
+            String(booking._id || booking.id) === bookingId
+              ? { ...booking, ...approvedBooking, bookingStatus: 'Approved', status: 'Approved' }
+              : booking,
+          );
+          return {
+            ...prev,
+            bookings: found ? updatedBookings : [{ ...approvedBooking, bookingStatus: 'Approved', status: 'Approved' }, ...updatedBookings],
+          };
+        });
+        notify({ message: 'New booking automatically approved.', variant: 'success' });
+      } catch (error) {
+        autoApprovingBookingIds.current.delete(bookingId);
+        console.error('Automatic booking approval failed:', error);
+        notify({ message: error?.message || 'Unable to automatically approve the new booking.', variant: 'error' });
+      }
+    };
+
+    const socket = io(apiConfig.socketUrl || 'http://localhost:5000', {
+      auth: { token },
+      withCredentials: true,
+      transports: ['websocket', 'polling'],
+    });
+
+    socket.on('notification:new', (item) => {
+      setAppData((prev) => {
+        const id = String(item?._id || item?.id || '');
+        if (!id) return prev;
+        const current = prev.notifications || [];
+        const normalized = {
+          ...item,
+          id,
+          _id: id,
+          detail: item.message || item.detail || '',
+          read: item.isRead ?? item.read ?? false,
+          time: item.createdAt
+            ? new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            : 'Just now',
+        };
+        const withoutDuplicate = current.filter((notification) => String(notification.id || notification._id) !== id);
+        return { ...prev, notifications: [normalized, ...withoutDuplicate] };
+      });
+      autoApproveNewBooking(item);
+    });
+
+    return () => socket.disconnect();
+  }, [setAppData, settings.autoApprove, notify]);
+
+  useEffect(() => {
+    if (!sidebarOpen) return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') setSidebarOpen(false);
+    };
+
+    document.body.style.overflow = 'hidden';
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [sidebarOpen]);
 
   const handleSearchNavigate = (result) => {
     setGlobalSearch('');
-    setSearchResults([]);
     navigate(result.route);
   };
 
@@ -175,13 +254,16 @@ function AdminLayout({ appData, setAppData, onLogout, notify }) {
     '/notifications': 'Notifications',
     '/reviews': 'Reviews',
     '/reports': 'Reports',
+    '/announcements': 'Announcements',
+    '/areas': 'Areas',
     '/rent-management': 'Rent Management',
     '/settings': 'Settings',
     '/profile': 'Admin Profile',
     '/tenant-profiles': 'Tenant Profiles',
   };
 
-  const currentTitle = titleMap[location.pathname] || 'Dashboard';
+  const currentRoute = location.pathname.replace(/^\/admin/, '') || '/';
+  const currentTitle = titleMap[currentRoute] || (currentRoute.startsWith('/tenant-profile/') ? 'Tenant Profile' : 'Dashboard');
 
   const handleBookingDecision = async (bookingId, bookingStatus) => {
     try {
@@ -233,13 +315,20 @@ function AdminLayout({ appData, setAppData, onLogout, notify }) {
   };
 
   return (
-    <div className={`dashboard-shell ${collapsed ? 'sidebar-collapsed' : ''}`}>
-      <button type="button" className="menu-toggle" onClick={() => setSidebarOpen((prev) => !prev)} aria-label="Open sidebar">
-        ☰
+    <div className={`dashboard-shell ${collapsed ? 'sidebar-collapsed' : ''}`} data-theme={darkMode ? 'dark' : 'light'}>
+      <button
+        type="button"
+        className="menu-toggle"
+        onClick={() => setSidebarOpen((prev) => !prev)}
+        aria-label={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
+        aria-expanded={sidebarOpen}
+        aria-controls="admin-sidebar"
+      >
+        {sidebarOpen ? '×' : '☰'}
       </button>
       <div className={`sidebar-backdrop ${sidebarOpen ? 'show' : ''}`} onClick={() => setSidebarOpen(false)} />
 
-      <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
+      <aside id="admin-sidebar" className={`sidebar ${sidebarOpen ? 'open' : ''}`} aria-label="Admin navigation">
         <div className="sidebar-header">
           <div className="app-brand">RMS</div>
           {!collapsed && (
@@ -318,12 +407,30 @@ function AdminLayout({ appData, setAppData, onLogout, notify }) {
                 </div>
               )}
             </div>
-            <button type="button" className="header-icon-button notification-button" aria-label="Notifications" onClick={() => navigate('/admin/notifications')}>
+            <button
+              type="button"
+              className="header-icon-button notification-button"
+              aria-label="Open notifications"
+              title="Open notifications"
+              onClick={() => navigate('/admin/notifications')}
+            >
               🔔
-              {unreadCount > 0 && <span className="header-badge">{unreadCount}</span>}
+              {notificationsEnabled && unreadCount > 0 && <span className="header-badge">{unreadCount}</span>}
             </button>
             <button type="button" className="profile-pill" onClick={() => navigate('/admin/profile')}>
-              <span className="avatar-wrap">{adminName.slice(0, 2).toUpperCase()}</span>
+              <span className="avatar-wrap">
+                {adminName.slice(0, 2).toUpperCase()}
+                {adminImage && (
+                  <img
+                    className="profile-avatar-image"
+                    src={adminImage}
+                    alt={`${adminName} profile`}
+                    onError={(event) => {
+                      event.currentTarget.style.display = 'none';
+                    }}
+                  />
+                )}
+              </span>
               {!collapsed && (
                 <span className="profile-meta">
                   <strong>{adminName}</strong>
@@ -350,7 +457,7 @@ function AdminLayout({ appData, setAppData, onLogout, notify }) {
           <Route path="/notifications" element={<NotificationsPage appData={appData} setAppData={setAppData} notify={notify} />} />
           <Route path="/announcements" element={<AnnouncementsPage appState={appData} setAppState={setAppData} notify={notify} />} />
           <Route path="/areas" element={<AreasPage appData={appData} setAppData={setAppData} notify={notify} />} />
-          <Route path="/reviews" element={<ReviewsPage reviews={appData.reviews || []} />} />
+          <Route path="/reviews" element={<ReviewsPage appData={appData} setAppData={setAppData} notify={notify} />} />
           <Route path="/reports" element={<ReportsPage appData={appData} setAppData={setAppData} />} />
           <Route path="/tenant-profile/:tenantKey" element={<TenantProfilePage appData={appData} setAppData={setAppData} />} />
           <Route path="/profile" element={<AdminProfile appData={appData} setAppData={setAppData} notify={notify} />} />

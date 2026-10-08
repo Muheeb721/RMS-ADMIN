@@ -4,7 +4,7 @@ export const AUTH_KEY = 'rms-admin-auth-v1';
 export const defaultState = {
   admin: {
     name: 'Ayesha Khan',
-    email: 'admin@rms.com',
+    email: 'muheebshahid75@gmail.com',
     phone: '+92 300 1234567',
     role: 'Super Administrator',
     timezone: 'GMT +5',

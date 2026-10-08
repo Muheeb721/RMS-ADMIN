@@ -1,7 +1,7 @@
 import './SettingsPage.css';
 
 const defaultSettings = {
-  darkMode: true,
+  darkMode: false,
   notifications: true,
   autoApprove: false,
   emailAlerts: true,
@@ -10,21 +10,35 @@ const defaultSettings = {
   itemsPerPage: 10,
 };
 
+const settingLabels = {
+  darkMode: 'Dark Mode',
+  notifications: 'Notifications',
+  autoApprove: 'Auto Approve Bookings',
+  emailAlerts: 'Email Alerts',
+  dateFormat: 'Date Format',
+  timezone: 'Timezone',
+  itemsPerPage: 'Items Per Page',
+};
+
 function SettingsPage({ appData, setAppData, notify }) {
   const settings = { ...defaultSettings, ...(appData.settings || {}) };
 
   const handleToggle = (key) => {
+    const nextValue = !settings[key];
     setAppData((prev) => ({
       ...prev,
-      settings: { ...(prev.settings || {}), [key]: !(prev.settings?.[key] ?? defaultSettings[key]) },
+      settings: { ...(prev.settings || {}), [key]: nextValue },
     }));
+    notify({ message: `${settingLabels[key]} ${nextValue ? 'enabled' : 'disabled'}.`, variant: 'success' });
   };
 
   const handleSelect = (key, value) => {
+    const nextValue = key === 'itemsPerPage' ? Number(value) : value;
     setAppData((prev) => ({
       ...prev,
-      settings: { ...(prev.settings || {}), [key]: value },
+      settings: { ...(prev.settings || {}), [key]: nextValue },
     }));
+    notify({ message: `${settingLabels[key]} updated.`, variant: 'success' });
   };
 
   return (
@@ -39,10 +53,21 @@ function SettingsPage({ appData, setAppData, notify }) {
               return (
                 <div className="setting-row" key={key}>
                   <div>
-                    <strong>{key.replace(/([A-Z])/g, ' $1').replace(/^./, (str) => str.toUpperCase())}</strong>
+                    <strong>{settingLabels[key] || key}</strong>
+                    <small className="setting-description">
+                      {key === 'darkMode' && 'Apply a dark appearance across the admin panel.'}
+                      {key === 'notifications' && 'Show unread notification indicators in the header.'}
+                      {key === 'autoApprove' && 'Automatically approve new bookings while the admin panel is online.'}
+                      {key === 'emailAlerts' && 'Save your preference for email alerts.'}
+                    </small>
                   </div>
                   <label className="switch">
-                    <input type="checkbox" checked={Boolean(value)} onChange={() => handleToggle(key)} />
+                    <input
+                      type="checkbox"
+                      checked={Boolean(value)}
+                      onChange={() => handleToggle(key)}
+                      aria-label={settingLabels[key] || key}
+                    />
                     <span className="slider" />
                   </label>
                 </div>
@@ -52,9 +77,13 @@ function SettingsPage({ appData, setAppData, notify }) {
             return (
               <div className="setting-row" key={key}>
                 <div>
-                  <strong>{key.replace(/([A-Z])/g, ' $1').replace(/^./, (str) => str.toUpperCase())}</strong>
+                  <strong>{settingLabels[key] || key}</strong>
                 </div>
-                <select value={value} onChange={(event) => { handleSelect(key, event.target.value); notify({ message: 'Settings updated.', variant: 'success' }); }}>
+                <select
+                  value={value}
+                  onChange={(event) => handleSelect(key, event.target.value)}
+                  aria-label={settingLabels[key] || key}
+                >
                   {key === 'dateFormat' && (
                     <>
                       <option value="DD/MM/YYYY">DD/MM/YYYY</option>

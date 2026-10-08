@@ -1,29 +1,56 @@
 import { apiService } from './api';
 
-export const createAdminProperty = async (property) => {
+export const createAdminProperty = async (property, images = []) => {
+  if (images.length) {
+    const body = new FormData();
+    Object.entries(property).forEach(([key, value]) => {
+      if (value === undefined || value === null || ['images', 'image', 'featuredImage'].includes(key)) return;
+      if (typeof value !== 'object') body.append(key, String(value));
+    });
+    images.forEach((image) => body.append('images', image, image.name));
+    const response = await apiService.request('/admin/properties', {
+      method: 'POST',
+      body,
+    });
+    if (!response?.success) throw new Error(response?.message || 'Property creation failed.');
+    return response.data || null;
+  }
+
   const response = await apiService.request('/admin/properties', {
     method: 'POST',
     body: property,
   });
-  console.log('Admin create property response:', response);
+  if (!response?.success) throw new Error(response?.message || 'Property creation failed.');
   return response?.data || null;
 };
 
 export const updateAdminProperty = async (id, property) => {
+  if (!id) throw new Error('Property ID is required.');
+  if (!property || typeof property !== 'object') {
+    throw new Error('Property update data is required.');
+  }
+
   const response = await apiService.request(`/admin/properties/${id}`, {
     method: 'PUT',
     body: property,
   });
-  console.log('Admin update property response:', response);
-  return response?.data || null;
+
+  if (!response?.success) {
+    throw new Error(response?.message || 'Property update failed.');
+  }
+
+  return response.data || null;
 };
 
 export const deleteAdminProperty = async (id) => {
+  if (!id) throw new Error('Property ID is required.');
   const response = await apiService.request(`/admin/properties/${id}`, {
     method: 'DELETE',
   });
-  console.log('Admin delete property response:', response);
-  return response?.data || null;
+  if (!response?.success) {
+    throw new Error(response?.message || 'Property deletion failed.');
+  }
+  return response.data || null;
 };
 
 export const uploadPropertyImage = async (id, file) => {
@@ -67,6 +94,25 @@ export const replacePropertyImage = async (id, index, file) => {
   return response?.data || null;
 };
 
+export const replaceMainPropertyImage = async (id, file) => {
+  if (!file) throw new Error('File is required for replacement');
+  if (!id) throw new Error('Property ID is required for replacement');
+
+  const formData = new FormData();
+  formData.append('image', file, file.name);
+
+  const response = await apiService.request(`/properties/${id}/image`, {
+    method: 'PUT',
+    body: formData,
+  });
+
+  if (!response?.success) {
+    throw new Error(response?.message || 'Image replacement failed');
+  }
+
+  return response?.data || null;
+};
+
 export const replacePropertyImageById = async (id, imageId, file) => {
   if (!file) throw new Error('File is required for replacement');
   if (!id) throw new Error('Property ID is required for replacement');
@@ -97,7 +143,14 @@ export const replaceProfileImageById = async (profileId, imageId, file) => {
 
 export const deletePropertyImage = async (id, index) => {
   if (!id) throw new Error('Property ID is required for deletion');
-  if (index === undefined || index === null) throw new Error('Image index is required for deletion');
+  if (
+    index === undefined ||
+    index === null ||
+    !Number.isInteger(Number(index)) ||
+    Number(index) < 0
+  ) {
+    throw new Error('A valid non-negative image index is required for deletion');
+  }
   
   const response = await apiService.request(`/properties/${id}/images/${index}`, {
     method: 'DELETE',
@@ -127,6 +180,7 @@ export default {
   deleteAdminProperty,
   uploadPropertyImage,
   replacePropertyImage,
+  replaceMainPropertyImage,
   replacePropertyImageById,
   deletePropertyImage,
   deletePropertyImageById,

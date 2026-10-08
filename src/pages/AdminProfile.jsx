@@ -1,7 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import Modal from '../components/Modal';
 import { apiService } from '../services/api';
-import { uploadPropertyImage, replaceProfileImageById } from '../services/adminPropertyService';
 import './AdminProfile.css';
 
 export default function AdminProfile({ appData, setAppData, notify }) {
@@ -11,8 +10,10 @@ export default function AdminProfile({ appData, setAppData, notify }) {
   const [preview, setPreview] = useState(profile.image || '');
 
   useEffect(() => {
-    setProfile(appData.adminProfile || { name: '', email: '', phone: '', image: '' });
-    setPreview((appData.adminProfile && appData.adminProfile.image) || '');
+    Promise.resolve().then(() => {
+      setProfile(appData.adminProfile || { name: '', email: '', phone: '', image: '' });
+      setPreview((appData.adminProfile && appData.adminProfile.image) || '');
+    });
   }, [appData.adminProfile]);
 
   const handleField = (e) => setProfile((p) => ({ ...p, [e.target.name]: e.target.value }));

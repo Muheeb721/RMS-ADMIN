@@ -4,7 +4,7 @@ import Modal from '../components/Modal';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import { generateId } from '../services/localStorage';
 import { apiService } from '../services/api';
-import { createAdminProperty, deleteAdminProperty, updateAdminProperty } from '../services/adminPropertyService';
+import { createAdminProperty, deleteAdminProperty, updateAdminProperty, uploadPropertyImage, replacePropertyImage } from '../services/adminPropertyService';
 
 const emptyForm = {
   title: '',
@@ -50,6 +50,7 @@ const BACKEND_BASE_URL = (import.meta.env.VITE_API_URL || import.meta.env.VITE_A
   .replace(/\/api\/?$/, '')
   .replace(/\/$/, '') || 'http://localhost:5000';
 const normalizeImageUrl = (value) => {
+  if (value && typeof value === 'object') value = value.url;
   if (!value || typeof value !== 'string') return APARTMENT_DEFAULT_IMAGE;
   const trimmed = value.trim();
   if (!trimmed) return APARTMENT_DEFAULT_IMAGE;
@@ -92,6 +93,7 @@ function ApartmentsPage({ appData, setAppData, notify }) {
   const [editingId, setEditingId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
   const [formData, setFormData] = useState(emptyForm);
+  const [selectedImageFile, setSelectedImageFile] = useState(null);
   const [errors, setErrors] = useState({});
 
   const filteredProperties = useMemo(() => {
@@ -171,6 +173,7 @@ function ApartmentsPage({ appData, setAppData, notify }) {
   const handleImagePick = (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
+    setSelectedImageFile(file);
     const reader = new FileReader();
     reader.onload = () => {
       setFormData((prev) => ({ ...prev, image: String(reader.result || ''), images: [String(reader.result || '')] }));
@@ -246,19 +249,26 @@ function ApartmentsPage({ appData, setAppData, notify }) {
       ownerName: formData.ownerName.trim(),
       ownerPhone: formData.ownerPhone.trim(),
       ownerEmail: formData.ownerEmail.trim(),
-      image: formData.image || APARTMENT_DEFAULT_IMAGE,
-      images: Array.isArray(formData.images) && formData.images.length ? formData.images : [formData.image || APARTMENT_DEFAULT_IMAGE],
       status: formData.status,
       createdAt: editingId ? previousProperty?.createdAt || new Date().toISOString() : new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       priceHistory: nextPriceHistory,
     };
+    if (!selectedImageFile) {
+      payload.image = previousProperty?.image || '';
+      payload.images = Array.isArray(previousProperty?.images) ? previousProperty.images : [];
+    }
 
     try {
       const saved = editingId
         ? await updateAdminProperty(editingId, payload)
         : await createAdminProperty(payload);
       const finalProperty = saved || payload;
+      const savedId = getPropertyId(finalProperty) || editingId;
+      if (selectedImageFile && savedId) {
+        if (Array.isArray(previousProperty?.images) && previousProperty.images.length) await replacePropertyImage(savedId, 0, selectedImageFile);
+        else await uploadPropertyImage(savedId, selectedImageFile);
+      }
 
       await refreshProperties();
 
@@ -283,6 +293,7 @@ function ApartmentsPage({ appData, setAppData, notify }) {
       addActivity(editingId ? 'Apartment edited' : 'Apartment added', `${finalProperty.title || payload.title} was ${editingId ? 'updated' : 'added'} to the apartment catalog.`);
       notify({ message: editingId ? 'Apartment updated successfully.' : 'Apartment added successfully.', variant: 'success' });
       setModalOpen(false);
+      setSelectedImageFile(null);
       setEditingId(null);
       setFormData(emptyForm);
     } catch (error) {

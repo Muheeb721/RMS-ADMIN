@@ -4,7 +4,8 @@ import './App.css';
 import Toast from './components/Toast';
 import AdminLayout from './components/AdminLayout';
 import LoginPage from './pages/LoginPage';
-import { clearAllAppStorage, clearAuthState, loadAppData, loadAuthState, persistAppData, saveLoginCredentials, setAuthState } from './services/localStorage';
+import AdminForgotPasswordPage from './pages/AdminForgotPasswordPage';
+import { clearAllAppStorage, clearAuthState, clearLoginCredentials, loadAppData, loadAuthState, persistAppData, setAuthState } from './services/localStorage';
 import { clearAdminAuthToken, login as loginAdmin } from './services/adminAuth';
 import { apiService } from './services/api';
 
@@ -16,6 +17,10 @@ function App() {
   useEffect(() => {
     persistAppData(appData);
   }, [appData]);
+
+  useEffect(() => {
+    clearLoginCredentials();
+  }, []);
 
   useEffect(() => {
     setAuthState(isAuthenticated);
@@ -82,39 +87,31 @@ function App() {
         setToast({ message: result?.message || 'Admin login failed.', variant: 'error' });
         return false;
       }
+      if (String(result?.data?.user?.role || '').toLowerCase() !== 'admin') {
+        clearAdminAuthToken();
+        setToast({ message: 'This account does not have admin access.', variant: 'error' });
+        return false;
+      }
 
       // If backend returned user/profile data, merge it into app state
       if (result?.data?.user) {
         const userData = result.data.user;
+        const adminName = userData.fullName || userData.name || userData.username || userData.email?.split('@')[0] || 'Admin';
+        const authenticatedUser = {
+          ...userData,
+          fullName: adminName,
+          name: adminName,
+          profileImage: userData.profileImage || userData.profile?.profileImage || userData.profileData?.profileImage || '',
+        };
         setAppData((prev) => ({
           ...prev,
-          profile: { ...prev.profile, ...userData },
-          admin: { ...prev.admin, ...userData },
+          profile: { ...prev.profile, ...authenticatedUser },
+          admin: { ...prev.admin, ...authenticatedUser },
         }));
       }
 
-      const loginNotification = {
-        id: `notif-${Date.now()}`,
-        title: 'Admin logged in',
-        message: `${email} signed in to the admin portal.`,
-        detail: `Login by ${email}. Role: Administrator.`,
-        type: 'Login',
-        recipient: email,
-        date: new Date().toISOString(),
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        read: false,
-        priority: 'Normal',
-      };
-
-      saveLoginCredentials(email, password);
-
-      setAppData((prev) => ({
-        ...prev,
-        notifications: [loginNotification, ...(prev.notifications || [])],
-      }));
-
       setIsAuthenticated(true);
-      setToast({ message: 'Welcome back, Admin 👋', variant: 'success' });
+      setToast({ message: `Welcome back, ${result?.data?.user?.fullName || result?.data?.user?.name || result?.data?.user?.username || 'Admin'} 👋`, variant: 'success' });
       return true;
     } catch (error) {
       setToast({ message: error.message || 'Admin login failed.', variant: 'error' });
@@ -144,6 +141,7 @@ function App() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route path="/forgot-password" element={isAuthenticated ? <Navigate to="/admin" replace /> : <AdminForgotPasswordPage />} />
         <Route path="/login" element={isAuthenticated ? <Navigate to="/admin" replace /> : <LoginPage onLogin={handleLogin} />} />
         <Route path="/" element={<Navigate to={isAuthenticated ? '/admin' : '/login'} replace />} />
         <Route

@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import './UsersPage.css';
 import Modal from '../components/Modal';
 import { formatDate } from '../utils/formatters';
-import { generateId } from '../services/localStorage';
 import { apiService } from '../services/api';
 
 const emptyForm = {
@@ -18,7 +17,6 @@ const emptyForm = {
 function UsersPage({ appData, setAppData, notify }) {
   const users = appData.users || [];
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
   const [roleFilter, setRoleFilter] = useState('All');
@@ -84,7 +82,6 @@ function UsersPage({ appData, setAppData, notify }) {
   useEffect(() => {
     const loadUsers = async () => {
       try {
-        setLoading(true);
         const resp = await apiService.request('/admin/users');
         if (resp?.success) {
           const nextUsers = Array.isArray(resp.data) ? resp.data : [];
@@ -107,8 +104,6 @@ function UsersPage({ appData, setAppData, notify }) {
         }
       } catch (e) {
         console.warn('Unable to load users', e?.message || e);
-      } finally {
-        setLoading(false);
       }
     };
 
@@ -154,53 +149,51 @@ function UsersPage({ appData, setAppData, notify }) {
         }
         payload.password = formData.password;
         const resp = await apiService.request('/admin/users', { method: 'POST', body: payload });
-        if (resp?.success) {
-          const nextUser = resp.data;
-          setAppData((prev) => ({
-            ...prev,
-            users: [nextUser, ...(prev.users || [])],
-            tenants: [
-              {
-                id: nextUser._id || nextUser.id,
-                _id: nextUser._id || nextUser.id,
-                fullName: nextUser.fullName || nextUser.name || 'Unknown Tenant',
-                name: nextUser.name || nextUser.fullName || 'Unknown Tenant',
-                email: nextUser.email || '',
-                phone: nextUser.phone || '',
-                status: nextUser.status || 'Active',
-                propertyName: nextUser.propertyName || nextUser.property || '',
-                propertyId: nextUser.propertyId || '',
-                createdAt: nextUser.createdAt || new Date().toISOString(),
-              },
-              ...(prev.tenants || []),
-            ],
-          }));
-          addActivity('User added', `${nextUser.name || nextUser.fullName} was added by admin.`);
-          notify({ message: 'User created successfully.', variant: 'success' });
-        }
+        if (!resp?.success || !resp.data) throw new Error(resp?.message || 'User creation failed.');
+        const nextUser = resp.data;
+        setAppData((prev) => ({
+          ...prev,
+          users: [nextUser, ...(prev.users || [])],
+          tenants: [
+            {
+              id: nextUser._id || nextUser.id,
+              _id: nextUser._id || nextUser.id,
+              fullName: nextUser.fullName || nextUser.name || 'Unknown Tenant',
+              name: nextUser.name || nextUser.fullName || 'Unknown Tenant',
+              email: nextUser.email || '',
+              phone: nextUser.phone || '',
+              status: nextUser.status || 'Active',
+              propertyName: nextUser.propertyName || nextUser.property || '',
+              propertyId: nextUser.propertyId || '',
+              createdAt: nextUser.createdAt || new Date().toISOString(),
+            },
+            ...(prev.tenants || []),
+          ],
+        }));
+        addActivity('User added', `${nextUser.name || nextUser.fullName} was added by admin.`);
+        notify({ message: 'User created successfully.', variant: 'success' });
       } else {
         const resp = await apiService.request(`/admin/users/${editingId}`, { method: 'PUT', body: payload });
-        if (resp?.success) {
-          const updatedUser = resp.data;
-          setAppData((prev) => ({
-            ...prev,
-            users: (prev.users || []).map((u) => (String(u._id || u.id) === String(editingId) ? updatedUser : u)),
-            tenants: (prev.tenants || []).map((u) => (String(u._id || u.id) === String(editingId)
-              ? {
-                  ...u,
-                  id: updatedUser._id || updatedUser.id || u.id,
-                  _id: updatedUser._id || updatedUser.id || u._id,
-                  fullName: updatedUser.fullName || updatedUser.name || u.fullName || u.name,
-                  name: updatedUser.name || updatedUser.fullName || u.name || u.fullName,
-                  email: updatedUser.email || u.email,
-                  phone: updatedUser.phone || u.phone,
-                  status: updatedUser.status || u.status,
-                }
-              : u)),
-          }));
-          addActivity('User edited', `${updatedUser.name || updatedUser.fullName} was updated by admin.`);
-          notify({ message: 'User updated successfully.', variant: 'success' });
-        }
+        if (!resp?.success || !resp.data) throw new Error(resp?.message || 'User update failed.');
+        const updatedUser = resp.data;
+        setAppData((prev) => ({
+          ...prev,
+          users: (prev.users || []).map((u) => (String(u._id || u.id) === String(editingId) ? updatedUser : u)),
+          tenants: (prev.tenants || []).map((u) => (String(u._id || u.id) === String(editingId)
+            ? {
+                ...u,
+                id: updatedUser._id || updatedUser.id || u.id,
+                _id: updatedUser._id || updatedUser.id || u._id,
+                fullName: updatedUser.fullName || updatedUser.name || u.fullName || u.name,
+                name: updatedUser.name || updatedUser.fullName || u.name || u.fullName,
+                email: updatedUser.email || u.email,
+                phone: updatedUser.phone || u.phone,
+                status: updatedUser.status || u.status,
+              }
+            : u)),
+        }));
+        addActivity('User edited', `${updatedUser.name || updatedUser.fullName} was updated by admin.`);
+        notify({ message: 'User updated successfully.', variant: 'success' });
       }
 
       setModalOpen(false);
@@ -217,15 +210,14 @@ function UsersPage({ appData, setAppData, notify }) {
   const deleteUser = async (userId) => {
     try {
       const resp = await apiService.request(`/admin/users/${userId}`, { method: 'DELETE' });
-      if (resp?.success) {
-        setAppData((prev) => ({
-          ...prev,
-          users: (prev.users || []).filter((u) => String(u._id || u.id) !== String(userId)),
-          tenants: (prev.tenants || []).filter((u) => String(u._id || u.id) !== String(userId)),
-        }));
-        addActivity('User archived', `User ${userId} archived by admin.`);
-        notify({ message: 'User archived successfully.', variant: 'success' });
-      }
+      if (!resp?.success) throw new Error(resp?.message || 'User deletion failed.');
+      setAppData((prev) => ({
+        ...prev,
+        users: (prev.users || []).filter((u) => String(u._id || u.id) !== String(userId)),
+        tenants: (prev.tenants || []).filter((u) => String(u._id || u.id) !== String(userId)),
+      }));
+      addActivity('User archived', `User ${userId} archived by admin.`);
+      notify({ message: 'User archived successfully.', variant: 'success' });
     } catch (e) {
       console.error('Delete user failed', e);
       notify({ message: e?.message || 'Unable to archive user.', variant: 'error' });
@@ -237,17 +229,16 @@ function UsersPage({ appData, setAppData, notify }) {
   const toggleStatus = async (userId, nextStatus) => {
     try {
       const resp = await apiService.request(`/admin/users/${userId}`, { method: 'PUT', body: { status: nextStatus } });
-      if (resp?.success) {
-        const updatedUser = resp.data;
-        setAppData((prev) => ({
-          ...prev,
-          users: (prev.users || []).map((u) => (String(u._id || u.id) === String(userId) ? updatedUser : u)),
-          tenants: (prev.tenants || []).map((u) => (String(u._id || u.id) === String(userId)
-            ? { ...u, status: updatedUser.status || u.status, fullName: updatedUser.fullName || updatedUser.name || u.fullName || u.name }
-            : u)),
-        }));
-        notify({ message: `User status updated to ${nextStatus}.`, variant: 'success' });
-      }
+      if (!resp?.success || !resp.data) throw new Error(resp?.message || 'User status update failed.');
+      const updatedUser = resp.data;
+      setAppData((prev) => ({
+        ...prev,
+        users: (prev.users || []).map((u) => (String(u._id || u.id) === String(userId) ? updatedUser : u)),
+        tenants: (prev.tenants || []).map((u) => (String(u._id || u.id) === String(userId)
+          ? { ...u, status: updatedUser.status || u.status, fullName: updatedUser.fullName || updatedUser.name || u.fullName || u.name }
+          : u)),
+      }));
+      notify({ message: `User status updated to ${nextStatus}.`, variant: 'success' });
     } catch (e) {
       console.error('Toggle status failed', e);
       notify({ message: e?.message || 'Unable to update status.', variant: 'error' });

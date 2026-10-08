@@ -6,9 +6,6 @@ import { formatCurrency, formatDate } from '../utils/formatters';
 
 function DuesPage({ appData, setAppData, notify }) {
   const dues = appData.dues || [];
-  const [loadingDues, setLoadingDues] = useState(false);
-  const [processingDueId, setProcessingDueId] = useState(null);
-  const [sendingReminders, setSendingReminders] = useState(false);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
 
@@ -56,7 +53,6 @@ function DuesPage({ appData, setAppData, notify }) {
   const markPaid = (dueId) => {
     (async () => {
       try {
-        setProcessingDueId(dueId);
         notify && notify({ message: 'Recording payment...', variant: 'info' });
         const due = (appData.dues || []).find((d) => String(getDueId(d)) === String(dueId));
         const payload = {
@@ -87,57 +83,50 @@ function DuesPage({ appData, setAppData, notify }) {
       } catch (e) {
         console.error('Mark paid failed', e);
         notify && notify({ message: e?.message || 'Unable to mark due as paid.', variant: 'error' });
-      } finally {
-        setProcessingDueId(null);
       }
     })();
   };
 
-  const sendReminder = (due) => {
-    (async () => {
-      try {
-        setSendingReminders(true);
-        notify && notify({ message: `Sending reminder to ${getDueUser(due)}...`, variant: 'info' });
-        const payload = {
-          userId: due?.userId || due?.user || '',
-          userName: getDueUser(due),
-          entityType: 'RENT',
-          entityId: getDueId(due),
-          title: 'Rent reminder',
-          message: `Reminder: rent due for ${getDueProperty(due)}. Please pay ${formatCurrency(getDueAmount(due))}.`,
-          detail: `Reminder sent for ${getDueUser(due)} for ${getDueProperty(due)}.`,
-          actorType: 'system',
-          actorName: 'System',
-          actionType: 'REMINDER',
-          status: 'Notice',
-          date: new Date().toISOString(),
-        };
-        const resp = await apiService.request('/notifications/create', { method: 'POST', body: payload });
-        if (resp?.success && resp.data) {
-          setAppData((prev) => ({ ...prev, notifications: [resp.data, ...(prev.notifications || [])] }));
-          notify && notify({ message: `Reminder sent to ${getDueUser(due)}.`, variant: 'info' });
-        } else {
-          setAppData((prev) => ({
-            ...prev,
-            notifications: [
-              { id: `notif-${Date.now()}`, title: 'Rent reminder sent', detail: `Reminder sent for ${getDueUser(due)} for ${getDueProperty(due)}.`, time: 'Just now', read: false },
-              ...(prev.notifications || []),
-            ],
-          }));
-          notify && notify({ message: `Reminder queued for ${getDueUser(due)}.`, variant: 'info' });
-        }
-      } catch (e) {
-        console.error('Send reminder failed', e);
-        notify && notify({ message: e?.message || `Unable to send reminder to ${getDueUser(due)}.`, variant: 'error' });
-      } finally {
-        setSendingReminders(false);
+  const sendReminder = async (due) => {
+    try {
+      notify && notify({ message: `Sending reminder to ${getDueUser(due)}...`, variant: 'info' });
+      const payload = {
+        userId: due?.userId || due?.user || '',
+        userName: getDueUser(due),
+        entityType: 'RENT',
+        entityId: getDueId(due),
+        title: 'Rent reminder',
+        message: `Reminder: rent due for ${getDueProperty(due)}. Please pay ${formatCurrency(getDueAmount(due))}.`,
+        detail: `Reminder sent for ${getDueUser(due)} for ${getDueProperty(due)}.`,
+        actorType: 'system',
+        actorName: 'System',
+        actionType: 'REMINDER',
+        status: 'Notice',
+        date: new Date().toISOString(),
+      };
+      const resp = await apiService.request('/notifications/create', { method: 'POST', body: payload });
+      if (!resp?.success || !resp.data) {
+        throw new Error(resp?.message || `Unable to send reminder to ${getDueUser(due)}.`);
       }
-    })();
+      setAppData((prev) => ({ ...prev, notifications: [resp.data, ...(prev.notifications || [])] }));
+      notify && notify({ message: `Reminder sent to ${getDueUser(due)}.`, variant: 'info' });
+    } catch (e) {
+      console.error('Send reminder failed', e);
+      notify && notify({ message: e?.message || `Unable to send reminder to ${getDueUser(due)}.`, variant: 'error' });
+    }
+  };
+
+  const sendOutstandingReminders = async () => {
+    const unpaidDues = filteredDues.filter((due) => normalizeDueStatus(due) !== 'Paid');
+    if (!unpaidDues.length) {
+      notify && notify({ message: 'There are no unpaid dues to remind.', variant: 'info' });
+      return;
+    }
+    await Promise.all(unpaidDues.map(sendReminder));
   };
 
   useEffect(() => {
     const loadDues = async () => {
-      setLoadingDues(true);
       try {
         const res = await apiService.request('/dues');
         if (res?.success) {
@@ -147,8 +136,6 @@ function DuesPage({ appData, setAppData, notify }) {
       } catch (err) {
         console.error('Failed to load dues:', err);
         notify && notify({ message: err?.message || 'Unable to load dues.', variant: 'error' });
-      } finally {
-        setLoadingDues(false);
       }
     };
 
@@ -189,7 +176,9 @@ function DuesPage({ appData, setAppData, notify }) {
               <option value="Paid">Paid</option>
               <option value="Overdue">Overdue</option>
             </select>
-            <button type="button" className="mini-button">Send Reminders</button>
+            <button type="button" className="mini-button" onClick={sendOutstandingReminders}>
+              Send Reminders
+            </button>
           </div>
         </div>
       </section>

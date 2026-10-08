@@ -3,9 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import './RentManagementPage.css';
 import Modal from '../components/Modal';
 import {
-  generateTenantId,
   generateRentRecordId,
-  generateRentPaymentId,
   generateReminderId,
   calculateRentStatus,
 } from '../services/localStorage';
@@ -61,6 +59,7 @@ function RentManagementPage({ appData, setAppData, notify }) {
   const [tab, setTab] = useState('dashboard');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [tenantModalOpen, setTenantModalOpen] = useState(false);
+  const [savingTenant, setSavingTenant] = useState(false);
   const [editTenant, setEditTenant] = useState(null);
   const [tenantForm, setTenantForm] = useState({
     fullName: '',
@@ -149,7 +148,7 @@ function RentManagementPage({ appData, setAppData, notify }) {
     loadRents();
   }, [setAppData]);
 
-  const runReminderSweep = () => {
+  function runReminderSweep() {
     const reminders = appData.rentReminders || [];
     const records = rentRecords || [];
     const daysBeforeList = (appData.rentSettings && appData.rentSettings.reminderDays) || defaultSettings.reminderDays;
@@ -195,7 +194,7 @@ function RentManagementPage({ appData, setAppData, notify }) {
       setAppData((prev) => ({ ...prev, rentReminders: [...nextReminders, ...(prev.rentReminders || [])], rentRecords: (prev.rentRecords || []).map((rec) => { const found = records.find((r) => r.id === rec.id); return found ? { ...rec, lateFee: found.lateFee, remainingAmount: found.remainingAmount } : rec; }), notifications: [...nextReminders.map((n) => ({ id: `notif-${Date.now()}-${Math.random().toString(36).slice(2,5)}`, title: n.type === 'Overdue' ? 'Rent Overdue' : 'Rent Reminder', message: n.message, date: n.date, read: false, type: 'Rent' })), ...(prev.notifications || [])] }));
       notify({ message: `${nextReminders.length} reminders generated`, variant: 'info' });
     }
-  };
+  }
 
   const stats = useMemo(() => {
     const totalTenants = tenants.length;
@@ -228,55 +227,81 @@ function RentManagementPage({ appData, setAppData, notify }) {
     setTenantModalOpen(true);
   };
 
-  const saveTenant = (e) => {
+  const saveTenant = async (e) => {
     e.preventDefault();
-    const payload = { ...tenantForm };
-    (async () => {
-      try {
-        if (editTenant) {
-          // attempt to update an existing user record if _id present
-          const userId = editTenant._id || editTenant.id;
-          if (userId && payload.email) {
-            const resp = await apiService.request(`/admin/users/${userId}`, { method: 'PUT', body: { name: payload.fullName, email: payload.email, phone: payload.phone, role: 'tenant', profile: { ...payload } } });
-            if (resp?.success) {
-              setAppData((prev) => ({ ...prev, tenants: (prev.tenants || []).map((t) => (String(t.id || t._id) === String(editTenant.id || editTenant._id) ? { ...t, ...resp.data } : t)) }));
-              notify({ message: 'Tenant updated', variant: 'success' });
-              return;
-            }
-          }
+    const payload = {
+      ...tenantForm,
+      fullName: tenantForm.fullName.trim(),
+      email: tenantForm.email.trim(),
+      phone: tenantForm.phone.trim(),
+    };
+    if (!payload.fullName || !payload.email) {
+      notify({ message: 'Tenant name and email are required.', variant: 'error' });
+      return;
+    }
 
-          // fallback to local update
-          setAppData((prev) => ({ ...prev, tenants: (prev.tenants || []).map((t) => (t.id === editTenant.id ? { ...t, ...payload } : t)) }));
-          notify({ message: 'Tenant updated (local)', variant: 'success' });
-        } else {
-          // create new tenant: prefer creating a user via admin API when email is provided
-          if (payload.email) {
-            const userPayload = { name: payload.fullName, email: payload.email, phone: payload.phone, password: payload.password || Math.random().toString(36).slice(2, 8), role: 'tenant', profile: { ...payload } };
-            const resp = await apiService.request('/admin/users', { method: 'POST', body: userPayload });
-            if (resp?.success) {
-              const created = resp.data;
-              const tenant = { id: created._id || created.id, _id: created._id || created.id, fullName: created.name || created.fullName || payload.fullName, email: created.email || payload.email, phone: created.phone || payload.phone, ...payload };
-              setAppData((prev) => ({ ...prev, tenants: [tenant, ...(prev.tenants || [])] }));
-              notify({ message: 'Tenant added', variant: 'success' });
-              return;
-            }
-          }
-
-          // fallback to local-only tenant creation
-          const id = generateTenantId(tenants);
-          const tenant = { id, ...payload };
-          setAppData((prev) => ({ ...prev, tenants: [tenant, ...(prev.tenants || [])] }));
-          notify({ message: 'Tenant added (local)', variant: 'success' });
+    setSavingTenant(true);
+    try {
+      if (editTenant) {
+        const userId = editTenant._id || editTenant.id;
+        if (!userId || String(userId).startsWith('tenant-')) {
+          throw new Error('This tenant has no backend user record to update.');
         }
-      } catch (err) {
-        console.error('Save tenant failed', err);
-        notify({ message: err?.message || 'Unable to save tenant.', variant: 'error' });
+        const resp = await apiService.request(`/admin/users/${userId}`, {
+          method: 'PUT',
+          body: { name: payload.fullName, email: payload.email, phone: payload.phone, role: 'tenant', profile: { ...payload } },
+        });
+        if (!resp?.success || !resp.data) throw new Error(resp?.message || 'Tenant update failed.');
+        const updatedTenant = {
+          ...payload,
+          ...resp.data,
+          id: resp.data._id || resp.data.id || userId,
+          _id: resp.data._id || resp.data.id || userId,
+          fullName: resp.data.fullName || resp.data.name || payload.fullName,
+        };
+        setAppData((prev) => ({
+          ...prev,
+          users: (prev.users || []).map((user) => String(user._id || user.id) === String(userId) ? resp.data : user),
+          tenants: (prev.tenants || []).map((tenant) => String(tenant._id || tenant.id) === String(userId) ? updatedTenant : tenant),
+        }));
+        notify({ message: 'Tenant updated.', variant: 'success' });
+      } else {
+        const userPayload = {
+          name: payload.fullName,
+          email: payload.email,
+          phone: payload.phone,
+          password: payload.password || Math.random().toString(36).slice(2, 8),
+          role: 'tenant',
+          profile: { ...payload },
+        };
+        const resp = await apiService.request('/admin/users', { method: 'POST', body: userPayload });
+        if (!resp?.success || !resp.data) throw new Error(resp?.message || 'Tenant creation failed.');
+        const created = resp.data;
+        const tenant = {
+          id: created._id || created.id,
+          _id: created._id || created.id,
+          fullName: created.name || created.fullName || payload.fullName,
+          email: created.email || payload.email,
+          phone: created.phone || payload.phone,
+          ...payload,
+        };
+        setAppData((prev) => ({
+          ...prev,
+          users: [created, ...(prev.users || [])],
+          tenants: [tenant, ...(prev.tenants || [])],
+        }));
+        notify({ message: 'Tenant added.', variant: 'success' });
       }
-    })();
-    setTenantModalOpen(false);
+      setTenantModalOpen(false);
+    } catch (err) {
+      console.error('Save tenant failed', err);
+      notify({ message: err?.message || 'Unable to save tenant.', variant: 'error' });
+    } finally {
+      setSavingTenant(false);
+    }
   };
 
-  const generateMonthlyRent = async (forDate = new Date()) => {
+  async function generateMonthlyRent(forDate = new Date()) {
     const month = `${forDate.getFullYear()}-${String(forDate.getMonth() + 1).padStart(2, '0')}`;
     const existing = rentRecords.filter((r) => r.month === month);
     const newRecords = [];
@@ -291,8 +316,8 @@ function RentManagementPage({ appData, setAppData, notify }) {
         id,
         tenantId: t.id,
         tenantName: t.fullName,
-        propertyId: t.propertyId || t.propertyId || '',
-        propertyName: t.propertyName || t.propertyName || '',
+        propertyId: t.propertyId || '',
+        propertyName: t.propertyName || '',
         month,
         amount,
         paidAmount: 0,
@@ -301,27 +326,48 @@ function RentManagementPage({ appData, setAppData, notify }) {
         lateFee: 0,
         notes: '',
         createdAt: new Date().toISOString(),
-      };
+      }
       record.status = calculateRentStatus(record, settings);
       newRecords.push(record);
     });
 
     if (newRecords.length) {
-      // attempt to persist each record to backend
       const createdRecords = [];
+      let failedCount = 0;
       for (const nr of newRecords) {
         try {
-          const resp = await apiService.request('/rents', { method: 'POST', body: { propertyId: nr.propertyId, propertyName: nr.propertyName, monthlyRent: nr.monthlyRent, paid: 0, dueDate: nr.dueDate, month: nr.month, status: nr.status } });
-          if (resp?.success && resp.data) createdRecords.push(resp.data);
-          else createdRecords.push({ ...nr, id: nr.id || `rent-local-${Date.now()}` });
+          const resp = await apiService.request('/rents', {
+            method: 'POST',
+            body: {
+              userId: nr.tenantId,
+              userName: nr.tenantName,
+              propertyId: nr.propertyId,
+              propertyName: nr.propertyName,
+              monthlyRent: nr.amount,
+              paid: 0,
+              dueDate: nr.dueDate,
+              month: nr.month,
+              status: nr.status,
+            },
+          });
+          if (!resp?.success || !resp.data) throw new Error(resp?.message || 'Rent record was not saved.');
+          createdRecords.push(normalizeRentRecord(resp.data, createdRecords.length));
         } catch (err) {
-          console.warn('Create rent record failed', err);
-          createdRecords.push({ ...nr, id: nr.id || `rent-local-${Date.now()}` });
+          console.error('Create rent record failed', nr.tenantId, err);
+          failedCount += 1;
         }
       }
 
-      setAppData((prev) => ({ ...prev, rentRecords: [...createdRecords, ...(prev.rentRecords || [])] }));
-      notify({ message: `${createdRecords.length} rent records generated for ${month}`, variant: 'success' });
+      if (createdRecords.length) {
+        setAppData((prev) => ({ ...prev, rentRecords: [...createdRecords, ...(prev.rentRecords || [])] }));
+      }
+      if (failedCount && createdRecords.length) {
+        notify({ message: `${createdRecords.length} rent records saved; ${failedCount} failed.`, variant: 'warning' });
+      } else if (failedCount) {
+        notify({ message: 'Rent records could not be saved. Check the backend connection and try again.', variant: 'error' });
+      } else {
+        notify({ message: `${createdRecords.length} rent records generated for ${month}`, variant: 'success' });
+      }
     } else {
       notify({ message: 'No new rent records to generate', variant: 'info' });
     }
@@ -360,12 +406,15 @@ function RentManagementPage({ appData, setAppData, notify }) {
     };
 
     try {
-      // Create payment on backend
-      const savedPayment = await apiService.request('/payments', { method: 'POST', body: payload });
+      const paymentResponse = await apiService.request('/payments', { method: 'POST', body: payload });
+      if (!paymentResponse?.success || !paymentResponse.data) {
+        throw new Error(paymentResponse?.message || 'Payment was not saved.');
+      }
+      const savedPayment = paymentResponse.data;
 
-      // If rent exists on backend, update its paid/remaining/status
       const targetId = record._id || record.id;
       let updatedRent = null;
+      let rentUpdateError = null;
       if (targetId) {
         const paid = Number(record?.paidAmount || record?.paid || 0) + amount;
         const amountTotal = Number(record?.amount || record?.monthlyRent || 0);
@@ -373,33 +422,27 @@ function RentManagementPage({ appData, setAppData, notify }) {
         const status = paid >= amountTotal ? 'Paid' : paid > 0 ? 'Partial' : 'Pending';
 
         try {
-          updatedRent = await apiService.request(`/rents/${targetId}`, { method: 'PATCH', body: { paid, remaining, status } });
+          const rentResponse = await apiService.request(`/rents/${targetId}`, { method: 'PATCH', body: { paid, remaining, status } });
+          if (!rentResponse?.success || !rentResponse.data) {
+            throw new Error(rentResponse?.message || 'Rent balance was not updated.');
+          }
+          updatedRent = rentResponse.data;
         } catch (err) {
-          console.warn('Failed to persist rent update', err);
+          rentUpdateError = err;
+          console.error('Failed to persist rent update after payment was recorded', err);
         }
+      } else {
+        rentUpdateError = new Error('The rent record has no backend identifier.');
       }
 
-      // Update local app state from server responses
       setAppData((prev) => {
         const nextPayments = [savedPayment, ...(prev.rentPayments || [])];
 
         const nextRecords = (prev.rentRecords || []).map((r) => {
           const match = String(r._id || r.id) === String(targetId) || String(r.id) === String(rentId);
           if (!match) return r;
-          if (updatedRent) {
-            return {
-              ...r,
-              paidAmount: updatedRent.paid || updatedRent.paidAmount || (Number(r.paidAmount || r.paid || 0) + amount),
-              remainingAmount: updatedRent.remaining || updatedRent.remainingAmount || Math.max((updatedRent.amount || r.amount || r.monthlyRent || 0) - (updatedRent.paid || updatedRent.paidAmount || (Number(r.paidAmount || r.paid || 0) + amount)), 0),
-              status: updatedRent.status || r.status,
-            };
-          }
-          const paid = Number(r.paidAmount || r.paid || 0) + amount;
-          const amountTotal = Number(r.amount || r.monthlyRent || 0);
-          const remaining = Math.max(amountTotal - paid, 0);
-          const next = { ...r, paidAmount: paid, remainingAmount: remaining };
-          next.status = calculateRentStatus(next, prev.rentSettings || settings);
-          return next;
+          if (!updatedRent) return r;
+          return { ...r, ...normalizeRentRecord(updatedRent, 0) };
         });
 
         const notif = {
@@ -418,7 +461,11 @@ function RentManagementPage({ appData, setAppData, notify }) {
         return { ...prev, rentPayments: nextPayments, rentRecords: nextRecords, notifications: [notif, ...(prev.notifications || [])] };
       });
 
-      notify({ message: 'Payment saved', variant: 'success' });
+      if (rentUpdateError) {
+        notify({ message: 'Payment was recorded, but the rent balance could not be updated. Do not submit this payment again.', variant: 'warning' });
+      } else {
+        notify({ message: 'Payment saved', variant: 'success' });
+      }
       setPaymentModalOpen(false);
     } catch (err) {
       console.error('Save payment failed', err);
@@ -426,7 +473,7 @@ function RentManagementPage({ appData, setAppData, notify }) {
     }
   };
 
-  const sendReminder = (record, type = 'Due') => {
+  const sendReminder = async (record, type = 'Due') => {
     const remId = generateReminderId(new Date().toISOString(), appData.rentReminders || []);
     const reminder = {
       id: remId,
@@ -441,8 +488,37 @@ function RentManagementPage({ appData, setAppData, notify }) {
       sent: true,
     };
 
-    setAppData((prev) => ({ ...prev, rentReminders: [reminder, ...(prev.rentReminders || [])], notifications: [{ id: `notif-${Date.now()}`, title: 'Rent Reminder', message: reminder.message, date: new Date().toISOString(), read: false, type: 'Rent' }, ...(prev.notifications || [])] }));
-    notify({ message: 'Reminder sent', variant: 'success' });
+    try {
+      const response = await apiService.request('/notifications/create', {
+        method: 'POST',
+        body: {
+          userId: record.tenantId,
+          userName: record.tenantName,
+          entityType: 'RENT',
+          entityId: record._id || record.id,
+          title: type === 'Overdue' ? 'Rent overdue' : 'Rent reminder',
+          message: reminder.message,
+          detail: `Rent reminder for ${record.tenantName} for ${record.propertyName || 'their property'}.`,
+          actorType: 'admin',
+          actorName: 'Admin',
+          actionType: 'REMINDER',
+          status: 'Notice',
+          date: reminder.date,
+        },
+      });
+      if (!response?.success || !response.data) {
+        throw new Error(response?.message || 'Reminder was not saved.');
+      }
+      setAppData((prev) => ({
+        ...prev,
+        rentReminders: [reminder, ...(prev.rentReminders || [])],
+        notifications: [response.data, ...(prev.notifications || [])],
+      }));
+      notify({ message: 'Reminder sent', variant: 'success' });
+    } catch (error) {
+      console.error('Send rent reminder failed', error);
+      notify({ message: error?.message || 'Unable to send rent reminder.', variant: 'error' });
+    }
   };
 
   const tenantRows = (tenants || []).map((t) => (
@@ -676,7 +752,7 @@ function RentManagementPage({ appData, setAppData, notify }) {
         )}
       </div>
 
-      <Modal open={tenantModalOpen} title={editTenant ? 'Edit Tenant' : 'Add Tenant'} onClose={() => setTenantModalOpen(false)} footer={<><button type="button" className="outline-button" onClick={() => setTenantModalOpen(false)}>Cancel</button><button type="submit" form="tenant-form" className="primary-button">Save</button></>}>
+      <Modal open={tenantModalOpen} title={editTenant ? 'Edit Tenant' : 'Add Tenant'} onClose={() => !savingTenant && setTenantModalOpen(false)} footer={<><button type="button" className="outline-button" onClick={() => setTenantModalOpen(false)} disabled={savingTenant}>Cancel</button><button type="submit" form="tenant-form" className="primary-button" disabled={savingTenant}>{savingTenant ? 'Saving…' : 'Save'}</button></>}>
         <form id="tenant-form" className="property-form" onSubmit={saveTenant}>
           <div className="form-grid two-col">
             <label>
@@ -752,8 +828,6 @@ function RentManagementPage({ appData, setAppData, notify }) {
               <select value={paymentForm.method} onChange={(e) => setPaymentForm((prev) => ({ ...prev, method: e.target.value }))}>
                 <option>Cash</option>
                 <option>Bank Transfer</option>
-                <option>JazzCash</option>
-                <option>Easypaisa</option>
                 <option>Other</option>
               </select>
             </label>

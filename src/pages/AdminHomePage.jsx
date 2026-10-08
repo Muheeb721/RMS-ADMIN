@@ -1,14 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import './AdminHomePage.css';
 import Modal from '../components/Modal';
 import { apiService } from '../services/api';
 import {
-  deleteAdminProperty,
-  deletePropertyImage,
-  replacePropertyImage,
+  replaceMainPropertyImage,
   updateAdminProperty,
-  uploadPropertyImage,
 } from '../services/adminPropertyService';
 
 const FALLBACK_IMAGE = 'https://images.unsplash.com/photo-1568605114967-8130f3a36994?auto=format&fit=crop&w=1200&q=80';
@@ -106,6 +103,8 @@ const getSectionImageForCard = (sectionTitle, cardIndex, imageIndex, propertyId)
 const getPropertyImageCandidates = (property = {}) => {
   const list = [];
   const addImage = (value) => {
+    if (value && typeof value === 'object') value = value.url;
+    if (value && typeof value === 'object') value = value.url;
     if (!value || typeof value !== 'string') return;
     const trimmed = value.trim();
     if (!trimmed) return;
@@ -169,27 +168,9 @@ const steps = [
 function AdminHomePage({ appData, setAppData, notify }) {
   const properties = appData?.properties || [];
   const fileInputRefs = useRef({});
-  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    if (!properties.length) {
-      refreshProperties();
-    }
-  }, []);
-  const [editingProperty, setEditingProperty] = useState(null);
-  const [editForm, setEditForm] = useState({
-    title: '',
-    location: '',
-    city: '',
-    description: '',
-    price: '',
-    bedrooms: '',
-    bathrooms: '',
-    area: '',
-    status: 'Available',
-  });
-
-  const refreshProperties = async () => {
+  const refreshProperties = useCallback(async () => {
     try {
       const response = await apiService.request('/admin/properties');
       if (response?.success) {
@@ -198,7 +179,28 @@ function AdminHomePage({ appData, setAppData, notify }) {
     } catch (error) {
       console.warn('Unable to refresh admin home properties:', error);
     }
-  };
+  }, [setAppData]);
+
+  useEffect(() => {
+    if (!properties.length) {
+      refreshProperties();
+    }
+  }, [properties.length, refreshProperties]);
+  const [editingProperty, setEditingProperty] = useState(null);
+  const [editForm, setEditForm] = useState({
+    title: '',
+    location: '',
+    city: '',
+    address: '',
+    phase: '',
+    block: '',
+    description: '',
+    price: '',
+    bedrooms: '',
+    bathrooms: '',
+    area: '',
+    status: 'Available',
+  });
 
   const categories = useMemo(() => {
     const house = properties.filter((property) => {
@@ -223,7 +225,7 @@ function AdminHomePage({ appData, setAppData, notify }) {
     ];
   }, [properties]);
 
-  const handleImageSelection = async (property, imageIndex, file) => {
+  const handleImageSelection = async (property, file) => {
     if (!file) return;
 
     const propertyId = getPropertyId(property);
@@ -235,66 +237,15 @@ function AdminHomePage({ appData, setAppData, notify }) {
     try {
       notify({ message: 'Uploading image...', variant: 'info' });
 
-      const currentImages = Array.isArray(property?.images) && property.images.length
-        ? property.images.filter(Boolean)
-        : (property?.image ? [property.image] : []);
-
-      const hasExistingImage = currentImages.length > 0 && typeof imageIndex === 'number' && Boolean(currentImages[imageIndex]);
-      const result = hasExistingImage
-        ? await replacePropertyImage(propertyId, imageIndex, file)
-        : await uploadPropertyImage(propertyId, file);
-
-      const nextImages = Array.isArray(result?.images) && result.images.length
-        ? result.images
-            .map((img) => (typeof img === 'string' ? img.split('?')[0] : (img && typeof img === 'object' ? img.url?.split('?')[0] : '')))
-            .filter(Boolean)
-        : Array.isArray(result?.property?.images) && result.property.images.length
-          ? result.property.images
-              .map((img) => (typeof img === 'string' ? img.split('?')[0] : (img && typeof img === 'object' ? img.url?.split('?')[0] : '')))
-              .filter(Boolean)
-          : currentImages.map((img) => (typeof img === 'string' ? img.split('?')[0] : (img && typeof img === 'object' ? img.url?.split('?')[0] : ''))).filter(Boolean);
-
-      const cleanedImages = [...new Set(nextImages.filter(Boolean))];
-      if (!cleanedImages.length) {
-        throw new Error('No image URL in response');
-      }
-
+      // The backend replaces image index 0 in the same Property document.
+      // If no image exists, the endpoint creates the first image at index 0.
+      await replaceMainPropertyImage(propertyId, file);
       await refreshProperties();
-      notify({ message: 'Image updated successfully.', variant: 'success' });
+      notify({ message: 'Image deleted and replaced successfully.', variant: 'success' });
     } catch (error) {
       console.error('Image update failed:', error);
-      notify({ message: error?.message || 'Unable to update image.', variant: 'error' });
+      notify({ message: error?.message || 'Unable to replace image.', variant: 'error' });
       await refreshProperties();
-    }
-  };
-
-  const handleDeleteImage = async (property, imageIndex) => {
-    try {
-      const propertyId = getPropertyId(property);
-      if (!propertyId) {
-        throw new Error('Property ID missing');
-      }
-
-      await deletePropertyImage(propertyId, imageIndex);
-      await refreshProperties();
-      notify({ message: 'Image deleted successfully.', variant: 'success' });
-    } catch (error) {
-      console.error('Delete image failed:', error);
-      notify({ message: error?.message || 'Unable to delete image.', variant: 'error' });
-      await refreshProperties();
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!deleteTarget) return;
-    try {
-      await deleteAdminProperty(getPropertyId(deleteTarget));
-      await refreshProperties();
-      setDeleteTarget(null);
-      notify({ message: 'Property deleted successfully.', variant: 'success' });
-    } catch (error) {
-      console.error('Property deletion failed:', error);
-      notify({ message: error?.message || 'Unable to delete property.', variant: 'error' });
     }
   };
 
@@ -304,8 +255,13 @@ function AdminHomePage({ appData, setAppData, notify }) {
       title: property?.title || '',
       location: property?.location || property?.address || '',
       city: property?.city || '',
+      address: property?.address || '',
+      phase: property?.phase || '',
+      block: property?.block || '',
       description: property?.description || '',
       price: property?.price || property?.salePrice || '',
+      rent: property?.rent || '',
+      salePrice: property?.salePrice || '',
       bedrooms: property?.bedrooms || '',
       bathrooms: property?.bathrooms || '',
       area: property?.area || '',
@@ -315,17 +271,29 @@ function AdminHomePage({ appData, setAppData, notify }) {
 
   const saveEdit = async () => {
     if (!editingProperty) return;
+    if (!editForm.title.trim()) {
+      notify({ message: 'Property title is required.', variant: 'error' });
+      return;
+    }
+    setSaving(true);
     try {
       const existingImages = Array.isArray(editingProperty?.images) && editingProperty.images.length
-        ? editingProperty.images.map((i) => normalizeImageUrl(i)).filter(Boolean)
-        : (editingProperty?.image ? [normalizeImageUrl(editingProperty.image)] : []);
+        ? editingProperty.images
+          .map((image) => (typeof image === 'string' ? image : image?.url))
+          .filter(Boolean)
+        : (editingProperty?.image ? [editingProperty.image] : []);
 
       const payload = {
         title: editForm.title,
         location: editForm.location,
         city: editForm.city,
+        address: editForm.address,
+        phase: editForm.phase,
+        block: editForm.block,
         description: editForm.description,
         price: Number(editForm.price || 0),
+        rent: Number(editForm.rent || 0),
+        salePrice: Number(editForm.salePrice || editForm.price || 0),
         bedrooms: Number(editForm.bedrooms || 0),
         bathrooms: Number(editForm.bathrooms || 0),
         area: Number(editForm.area || 0),
@@ -341,11 +309,13 @@ function AdminHomePage({ appData, setAppData, notify }) {
     } catch (error) {
       console.error('Property update failed:', error);
       notify({ message: error?.message || 'Unable to update property.', variant: 'error' });
+    } finally {
+      setSaving(false);
     }
   };
 
-  const triggerHiddenInput = (propertyId, index) => {
-    const key = `${propertyId}-${index}`;
+  const triggerHiddenInput = (propertyId) => {
+    const key = `${propertyId}-main`;
     fileInputRefs.current[key]?.click();
   };
 
@@ -372,17 +342,13 @@ function AdminHomePage({ appData, setAppData, notify }) {
               event.currentTarget.src = FALLBACK_IMAGE;
             }}
           />
-          <div className="admin-home-image-overlay home-category-overlay">
-            <button type="button" onClick={() => triggerHiddenInput(propertyId, 0)}>Replace</button>
-            <button type="button" className="danger" onClick={() => handleDeleteImage(property, 0)}>Delete</button>
-          </div>
           <span className="admin-home-image-badge" style={{ background: tagColor }}>
             {isRentSection ? 'FOR RENT' : 'FEATURED'}
           </span>
           <input
             ref={(node) => {
               if (node) {
-                fileInputRefs.current[`${propertyId}-0`] = node;
+                fileInputRefs.current[`${propertyId}-main`] = node;
               }
             }}
             type="file"
@@ -391,7 +357,7 @@ function AdminHomePage({ appData, setAppData, notify }) {
             onChange={(event) => {
               const file = event.target.files?.[0];
               if (!file) return;
-              handleImageSelection(property, 0, file);
+              handleImageSelection(property, file);
               event.target.value = '';
             }}
           />
@@ -412,10 +378,19 @@ function AdminHomePage({ appData, setAppData, notify }) {
             <span className="meta-pill">{areaText}</span>
           </div>
           <div className="admin-home-actions">
-            <button type="button" className="admin-home-ghost-button admin-home-inquiry-button">Rent Inquiry</button>
-            <button type="button" className="admin-main-button admin-home-rent-button">Rent</button>
-            <button type="button" className="admin-home-save-button" aria-label="Save property">
-              <span>♡</span> Save
+            <button
+              type="button"
+              className="admin-home-ghost-button"
+              onClick={() => triggerHiddenInput(propertyId)}
+            >
+              Delete/Replace Image
+            </button>
+            <button
+              type="button"
+              className="admin-main-button"
+              onClick={() => openEditModal(property)}
+            >
+              Update
             </button>
           </div>
         </div>
@@ -527,27 +502,15 @@ function AdminHomePage({ appData, setAppData, notify }) {
       </footer>
 
       <Modal
-        open={Boolean(deleteTarget)}
-        title="Delete property"
-        onClose={() => setDeleteTarget(null)}
-        footer={
-          <>
-            <button type="button" className="outline-button" onClick={() => setDeleteTarget(null)}>Cancel</button>
-            <button type="button" className="primary-button danger-button" onClick={handleDelete}>Delete</button>
-          </>
-        }
-      >
-        <p>Are you sure you want to delete this property and all of its images? This action cannot be undone.</p>
-      </Modal>
-
-      <Modal
         open={Boolean(editingProperty)}
         title={`Update ${editingProperty?.title || 'property'}`}
         onClose={() => setEditingProperty(null)}
         footer={
           <>
             <button type="button" className="outline-button" onClick={() => setEditingProperty(null)}>Cancel</button>
-            <button type="button" className="primary-button" onClick={saveEdit}>Save changes</button>
+            <button type="button" className="primary-button" onClick={saveEdit} disabled={saving}>
+              {saving ? 'Saving...' : 'Save changes'}
+            </button>
           </>
         }
       >
@@ -579,6 +542,21 @@ function AdminHomePage({ appData, setAppData, notify }) {
             </label>
           </div>
 
+          <div className="form-grid three-col">
+            <label>
+              Address
+              <input value={editForm.address} onChange={(event) => setEditForm((prev) => ({ ...prev, address: event.target.value }))} />
+            </label>
+            <label>
+              Phase
+              <input value={editForm.phase} onChange={(event) => setEditForm((prev) => ({ ...prev, phase: event.target.value }))} />
+            </label>
+            <label>
+              Block
+              <input value={editForm.block} onChange={(event) => setEditForm((prev) => ({ ...prev, block: event.target.value }))} />
+            </label>
+          </div>
+
           <label>
             Description
             <textarea rows="4" value={editForm.description} onChange={(event) => setEditForm((prev) => ({ ...prev, description: event.target.value }))} />
@@ -589,6 +567,17 @@ function AdminHomePage({ appData, setAppData, notify }) {
               Price
               <input type="number" value={editForm.price} onChange={(event) => setEditForm((prev) => ({ ...prev, price: event.target.value }))} />
             </label>
+            <label>
+              Rent
+              <input type="number" value={editForm.rent} onChange={(event) => setEditForm((prev) => ({ ...prev, rent: event.target.value }))} />
+            </label>
+            <label>
+              Sale price
+              <input type="number" value={editForm.salePrice} onChange={(event) => setEditForm((prev) => ({ ...prev, salePrice: event.target.value }))} />
+            </label>
+          </div>
+
+          <div className="form-grid three-col">
             <label>
               Bedrooms
               <input type="number" value={editForm.bedrooms} onChange={(event) => setEditForm((prev) => ({ ...prev, bedrooms: event.target.value }))} />

@@ -15,7 +15,7 @@ export const setAdminAuthToken = (token) => {
   window.localStorage.setItem('rms_token', token);
   window.__RMS_AUTH_TOKEN = token;
   window.__rms_inmemory_token = token;
-  try { setAuthState(true); } catch (e) { /* ignore */ }
+  try { setAuthState(true); } catch { /* ignore */ }
 };
 
 export const clearAdminAuthToken = () => {
@@ -24,7 +24,7 @@ export const clearAdminAuthToken = () => {
   window.localStorage.removeItem('rms_token');
   delete window.__RMS_AUTH_TOKEN;
   delete window.__rms_inmemory_token;
-  try { setAuthState(false); } catch (e) { /* ignore */ }
+  try { setAuthState(false); } catch { /* ignore */ }
 };
 
 export const login = async (email, password) => {

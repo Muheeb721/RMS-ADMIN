@@ -309,3 +309,252 @@ img {
     height: auto;
   }
 }
+
+/* Keep controls at their intrinsic size instead of stretching every button. */
+@media (max-width: 900px) {
+  html,
+  body,
+  #root {
+    overflow-x: clip;
+  }
+
+  .dashboard-shell,
+  .content-area,
+  .page-section,
+  .panel-card,
+  .stat-card,
+  .content-grid,
+  .stats-grid,
+  .section-header,
+  .toolbar,
+  .table-wrap,
+  .property-form {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  button,
+  #root :is(button, .ant-btn, [role="button"]) {
+    width: auto !important;
+    max-width: 100%;
+    min-height: 44px !important;
+    white-space: normal;
+  }
+
+  .full-width,
+  .login-form .full-width,
+  .sidebar-footer button,
+  .modal-footer .primary-button,
+  .modal-footer .outline-button {
+    width: 100% !important;
+  }
+
+  input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+  select,
+  textarea {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .table-wrap {
+    width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .table-wrap table {
+    width: max-content;
+    min-width: 680px !important;
+    max-width: none !important;
+  }
+
+  .inline-actions,
+  .table-actions,
+  .toolbar-group,
+  .admin-property-slider-actions,
+  .modal-footer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .modal-overlay {
+    place-items: center;
+    padding: 12px;
+    overflow-y: auto;
+  }
+
+  .modal-card {
+    width: 100%;
+    max-width: 100% !important;
+    max-height: calc(100dvh - 24px);
+    min-height: 0;
+    margin: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+
+  .modal-header,
+  .modal-body,
+  .modal-footer {
+    min-width: 0;
+    padding: 14px;
+  }
+
+  .property-form,
+  .form-grid,
+  .property-form .form-grid,
+  .property-form .form-grid.two-col,
+  .property-form .form-grid.three-col,
+  .form-grid.two-col,
+  .form-grid.three-col {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .property-form > *,
+  .form-grid > * {
+    min-width: 0;
+  }
+
+  .property-form img,
+  .image-preview,
+  .property-thumb,
+  .admin-property-slider-card img {
+    max-width: 100%;
+    object-fit: cover;
+  }
+
+  .menu-toggle {
+    position: fixed;
+    z-index: 61;
+    top: 12px;
+    left: 12px;
+    display: grid !important;
+    width: 44px !important;
+    height: 44px !important;
+    min-height: 44px !important;
+    padding: 0;
+    place-items: center;
+  }
+
+  .sidebar {
+    z-index: 62;
+    max-width: min(86vw, 320px) !important;
+    height: 100dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .sidebar-backdrop {
+    z-index: 60;
+  }
+}
+
+@media (min-width: 601px) and (max-width: 900px) {
+  .stats-grid,
+  .stats-grid.three-column {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 600px) {
+  .content-area {
+    padding: 68px 12px 20px;
+  }
+
+  .topbar {
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+
+  .topbar-actions {
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .topbar-actions > * {
+    min-width: 0;
+  }
+
+  .search-box {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  .stats-grid,
+  .stats-grid.three-column,
+  .content-grid.two-column,
+  .properties-page .summary-strip,
+  .bookings-page .summary-strip {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .card-header,
+  .setting-row,
+  .list-row,
+  .toolbar-row,
+  .properties-page .toolbar-row,
+  .bookings-page .toolbar-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .card-header > *,
+  .toolbar-row > *,
+  .setting-row > * {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .table-wrap table {
+    min-width: 600px !important;
+  }
+
+  .page-section,
+  .panel-card,
+  .stat-card {
+    padding: 12px;
+  }
+
+  .login-shell {
+    min-height: 100dvh;
+    padding: 12px;
+  }
+
+  .login-card {
+    border-radius: 20px;
+  }
+
+  .login-visual,
+  .login-panel {
+    padding: 22px 18px;
+  }
+
+  .sidebar-footer {
+    gap: 8px;
+  }
+}
+
+@media (max-width: 360px) {
+  .content-area {
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+
+  .topbar h2 {
+    font-size: 1.1rem;
+  }
+
+  .modal-overlay {
+    padding: 8px;
+  }
+
+  .modal-card {
+    max-height: calc(100dvh - 16px);
+  }
+}

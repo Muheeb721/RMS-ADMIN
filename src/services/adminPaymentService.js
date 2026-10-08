@@ -10,6 +10,9 @@ export const createAdminPayment = async (payload) => {
     method: 'POST',
     body: payload,
   });
+  if (!response?.success || !response.data) {
+    throw new Error(response?.message || 'Payment creation failed.');
+  }
   return response?.data || null;
 };
 

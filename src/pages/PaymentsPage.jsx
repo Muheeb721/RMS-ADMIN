@@ -130,24 +130,24 @@ function PaymentsPage({ appData, setAppData, notify }) {
         body: payload,
       });
 
-      const createdPayment = response?.data || null;
-
-      if (createdPayment) {
-        setAppData((prev) => ({
-          ...prev,
-          payments: [createdPayment, ...(prev.payments || [])],
-          dues: (prev.dues || []).map((due) =>
-            due.user === formData.user.trim() && due.property === formData.property.trim() && formData.status === 'Paid'
-              ? {
-                  ...due,
-                  status: 'Paid',
-                  paymentStatus: 'Paid',
-                  updatedAt: new Date().toISOString(),
-                }
-              : due,
-          ),
-        }));
+      if (!response?.success || !response.data) {
+        throw new Error(response?.message || 'Payment was not saved.');
       }
+      const createdPayment = response.data;
+      setAppData((prev) => ({
+        ...prev,
+        payments: [createdPayment, ...(prev.payments || [])],
+        dues: (prev.dues || []).map((due) =>
+          due.user === formData.user.trim() && due.property === formData.property.trim() && formData.status === 'Paid'
+            ? {
+                ...due,
+                status: 'Paid',
+                paymentStatus: 'Paid',
+                updatedAt: new Date().toISOString(),
+              }
+            : due,
+        ),
+      }));
 
       notify({ message: "Payment recorded successfully.", variant: "success" });
       setModalOpen(false);

@@ -5,6 +5,7 @@ import Modal from '../components/Modal';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import { approveAdminBooking, rejectAdminBooking } from '../services/adminBookingService';
 import { apiService } from '../services/api';
+import { getAdminImageUrl } from '../utils/adminImageUrl';
 
 const emptyForm = {
   customerName: '',
@@ -133,11 +134,6 @@ function BookingsPage({ appData, setAppData, notify, onBookingDecision }) {
       return;
     }
 
-    if (editingId) {
-      notify({ message: 'Booking edits are managed through the approval workflow on the backend. Use the approval/rejection actions instead.', variant: 'info' });
-      return;
-    }
-
     const selectedProperty = properties.find((item) => item.id === formData.propertyId) || properties.find((item) => item.title === formData.propertyTitle);
     const payload = {
       userName: formData.customerName.trim(),
@@ -159,14 +155,23 @@ function BookingsPage({ appData, setAppData, notify, onBookingDecision }) {
       message: formData.notes.trim(),
     };
 
-    apiService.request('/bookings', { method: 'POST', body: payload })
+    apiService.request(editingId ? `/bookings/${editingId}` : '/bookings', {
+      method: editingId ? 'PUT' : 'POST',
+      body: payload,
+    })
       .then((response) => {
-        const createdBooking = response?.data || null;
-        if (createdBooking) {
-          setAppData((prev) => ({ ...prev, bookings: [createdBooking, ...(prev.bookings || [])] }));
+        if (!response?.success || !response.data) {
+          throw new Error(response?.message || (editingId ? 'Booking update failed.' : 'Booking creation failed.'));
         }
-        addActivity('Booking added', `${payload.customerName}'s booking was added.`);
-        notify({ message: 'Booking created successfully.', variant: 'success' });
+        const savedBooking = response.data;
+        setAppData((prev) => ({
+          ...prev,
+          bookings: editingId
+            ? (prev.bookings || []).map((item) => String(getBookingId(item)) === String(editingId) ? savedBooking : item)
+            : [savedBooking, ...(prev.bookings || [])],
+        }));
+        addActivity(editingId ? 'Booking updated' : 'Booking added', `${payload.customerName}'s booking was ${editingId ? 'updated' : 'added'}.`);
+        notify({ message: editingId ? 'Booking updated successfully.' : 'Booking created successfully.', variant: 'success' });
         setModalOpen(false);
         setEditingId(null);
         setFormData(emptyForm);
@@ -219,9 +224,10 @@ function BookingsPage({ appData, setAppData, notify, onBookingDecision }) {
       const booking = (bookings || []).find((item) => String(getBookingId(item)) === String(bookingId) || String(item.id) === String(bookingId) || String(item._id) === String(bookingId));
       const targetId = booking?._id || booking?.id || bookingId;
       if (targetId) {
-        await apiService.request(`/bookings/${targetId}`, {
+        const response = await apiService.request(`/bookings/${targetId}`, {
           method: 'DELETE',
         });
+        if (!response?.success) throw new Error(response?.message || 'Booking deletion failed.');
       }
       setAppData((prev) => ({ ...prev, bookings: (prev.bookings || []).filter((item) => String(getBookingId(item)) !== String(bookingId) && String(item.id) !== String(bookingId) && String(item._id) !== String(bookingId)) }));
       addActivity('Booking deleted', 'A booking record was removed.');
@@ -286,7 +292,9 @@ function BookingsPage({ appData, setAppData, notify, onBookingDecision }) {
           <span className="mini-badge">{filteredBookings.length} bookings</span>
         </div>
 
-        {filteredBookings.length === 0 ? (
+        {loadingBookings ? (
+          <div className="empty-state">Loading bookings...</div>
+        ) : filteredBookings.length === 0 ? (
           <div className="empty-state">
             <div className="empty-icon">📅</div>
             <h4>No bookings available</h4>
@@ -316,7 +324,17 @@ function BookingsPage({ appData, setAppData, notify, onBookingDecision }) {
                   return (
                     <tr key={bookingId}>
                       <td>{bookingId}</td>
-                      <td>{customerName}</td>
+                      <td>
+                        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                          {booking.profileImage && <img src={getAdminImageUrl(booking.profileImage)} alt={`${customerName} profile`} style={{ width: 42, height: 42, borderRadius: '50%', objectFit: 'cover' }} />}
+                          <div>
+                            <strong>{customerName}</strong>
+                            <div>{booking.userEmail || 'No email'}</div>
+                            <div>{booking.userPhone || booking.customerPhone || 'No phone'}</div>
+                            {booking.cnicImage && <a href={getAdminImageUrl(booking.cnicImage)} target="_blank" rel="noreferrer">View CNIC</a>}
+                          </div>
+                        </div>
+                      </td>
                       <td>{propertyTitle}</td>
                       <td>{formatCurrency(booking.amount || 0)}</td>
                       <td><span className={`status-badge ${String(booking.bookingStatus || booking.status || 'pending').toLowerCase()}`}>{booking.bookingStatus || booking.status || 'Pending'}</span></td>

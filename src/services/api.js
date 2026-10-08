@@ -48,7 +48,7 @@ export const apiService = {
     if (response.status === 401) {
       try {
         clearAdminAuthToken();
-      } catch (e) {
+      } catch {
         // ignore
       }
       throw new Error('Unauthorized');
@@ -61,6 +61,23 @@ export const apiService = {
     }
 
     return json;
+  },
+  download: async (endpoint, filename) => {
+    const url = `${apiConfig.baseUrl}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
+    const token = getAdminAuthToken();
+    const headers = new Headers();
+    headers.set('Accept', 'application/pdf');
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+    const response = await fetch(url, { headers });
+    if (!response.ok) throw new Error(`Unable to download file: ${response.status}`);
+    const objectUrl = URL.createObjectURL(await response.blob());
+    const anchor = document.createElement('a');
+    anchor.href = objectUrl;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(objectUrl);
   },
 };
 
