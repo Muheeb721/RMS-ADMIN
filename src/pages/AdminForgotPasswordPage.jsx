@@ -7,7 +7,7 @@ const API_BASE = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, ''
 function AdminForgotPasswordPage() {
   const navigate = useNavigate();
   const [step, setStep] = useState('email');
-  const [email, setEmail] = useState('admin@rental.com');
+  const [email, setEmail] = useState('admin@rms.com');
   const [otp, setOtp] = useState('');
   const [resetToken, setResetToken] = useState('');
   const [password, setPassword] = useState('');

@@ -5,6 +5,7 @@ import { approveAdminBooking, rejectAdminBooking } from '../services/adminBookin
 import { apiConfig, apiService } from '../services/api';
 import { getAdminImageUrl } from '../utils/adminImageUrl';
 import './AdminLayout.css';
+import './admin-theme.css';
 import DashboardPage from '../pages/DashboardPage';
 import AdminHomePage from '../pages/AdminHomePage';
 import PropertiesPage from '../pages/PropertiesPage';

@@ -12,7 +12,6 @@ export const apiConfig = {
     payments: '/payments',
     dues: '/dues',
     messages: '/messages',
-    chatbot: '/chatbot',
     analytics: '/analytics',
   },
 };

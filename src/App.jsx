@@ -125,11 +125,16 @@ function App() {
     clearAdminAuthToken();
     setIsAuthenticated(false);
     if (typeof window !== 'undefined') {
-      window.localStorage.removeItem('rms_auth_session');
-      window.localStorage.removeItem('rms_user_role');
-      window.localStorage.removeItem('rms_admin_auth');
-      window.localStorage.removeItem('rms_admin_token');
-      window.localStorage.removeItem('rms_token');
+      const authKeys = [
+        'rms_auth_session',
+        'rms_user_role',
+        'rms_admin_auth',
+        'rms_admin_token',
+        'rms_token',
+        'rms_remembered_email',
+        'rms_admin_login_credentials',
+      ];
+      authKeys.forEach((key) => window.localStorage.removeItem(key));
       delete window.__RMS_AUTH_TOKEN;
       delete window.__rms_inmemory_token;
       window.history.replaceState(null, '', '/login');

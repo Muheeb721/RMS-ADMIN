@@ -21,6 +21,7 @@ const emptyForm = {
   title: '',
   propertyType: 'House',
   category: 'House',
+  listingType: 'rent',
   description: '',
   price: '',
   rent: '',
@@ -44,7 +45,7 @@ const emptyForm = {
   status: 'Available',
 };
 
-const statusOptions = ['Available', 'Reserved', 'Sold', 'For Rent'];
+const statusOptions = ['Available', 'Reserved', 'Sold', 'For Rent', 'Rented', 'For Sale'];
 const getPropertyId = (property) => property?._id || property?.id || property?.propertyId || property?.mongoId;
 
 function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All' }) {
@@ -132,6 +133,7 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
       title: property.title || '',
       propertyType: property.propertyType || 'House',
       category: property.category || property.propertyType || 'House',
+      listingType: property.listingType || (property.transactionType === 'Sale' ? 'sale' : 'rent'),
       description: property.description || '',
       price: property.price || '',
       rent: property.rent || '',
@@ -162,7 +164,18 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
 
   const handleFieldChange = (event) => {
     const { name, value } = event.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+    setFormData((prev) => {
+      const next = { ...prev, [name]: value };
+      if (name === 'rent' || name === 'salePrice') {
+        const numericValue = value === '' ? '' : Number(value);
+        next.price = Number.isFinite(numericValue) ? numericValue : value;
+      }
+      if (name === 'listingType') {
+        const isSale = String(value).toLowerCase() === 'sale';
+        next.status = isSale ? 'For Sale' : (prev.status === 'For Sale' ? 'Available' : prev.status || 'Available');
+      }
+      return next;
+    });
   };
 
   const handleImagePick = (event) => {
@@ -216,18 +229,21 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
       }
     }
 
+    const isSaleListing = String(formData.listingType || 'rent').toLowerCase() === 'sale';
+    const activePrice = isSaleListing ? Number(formData.salePrice || formData.price || 0) : Number(formData.rent || formData.price || 0);
+
     const payload = {
       title: formData.title.trim(),
       propertyType: formData.propertyType,
       category: formData.category || formData.propertyType,
       type: formData.propertyType,
-      purpose: 'Rent',
-      transactionType: 'Rent',
-      listingType: 'rent',
+      purpose: isSaleListing ? 'Sale' : 'Rent',
+      transactionType: isSaleListing ? 'Sale' : 'Rent',
+      listingType: isSaleListing ? 'sale' : 'rent',
       description: formData.description.trim(),
-      price: Number(formData.rent || formData.price || 0),
-      rent: Number(formData.rent || formData.price || 0),
-      salePrice: 0,
+      price: activePrice,
+      rent: isSaleListing ? 0 : activePrice,
+      salePrice: isSaleListing ? activePrice : 0,
       deposit: Number(formData.deposit || 0),
       otherCharges: Number(formData.otherCharges || 0),
       location: formData.location.trim(),
@@ -346,6 +362,7 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
           title: finalProperty.title || '',
           propertyType: finalProperty.propertyType || 'House',
           category: finalProperty.category || finalProperty.propertyType || 'House',
+          listingType: finalProperty.listingType || (finalProperty.transactionType === 'Sale' ? 'sale' : 'rent'),
           description: finalProperty.description || '',
           price: finalProperty.price || '',
           rent: finalProperty.rent || '',
@@ -671,11 +688,18 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
               {errors.title && <span className="field-error">{errors.title}</span>}
             </label>
             <label>
-              Rental category
+              Property type
               <select name="propertyType" value={formData.propertyType} onChange={handleFieldChange}>
                 {['House', 'Apartment', 'Flat'].map((type) => (
                   <option key={type} value={type}>{type}</option>
                 ))}
+              </select>
+            </label>
+            <label>
+              Listing type
+              <select name="listingType" value={formData.listingType} onChange={handleFieldChange}>
+                <option value="rent">For Rent</option>
+                <option value="sale">For Sale</option>
               </select>
             </label>
           </div>
@@ -708,13 +732,13 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
           <div className="section-title">Pricing</div>
           <div className="form-grid three-col">
             <label>
-              Monthly rent
+              {formData.listingType === 'sale' ? 'Sale price' : 'Monthly rent'}
               <input type="number" name="price" value={formData.price} onChange={handleFieldChange} />
               {errors.price && <span className="field-error">{errors.price}</span>}
             </label>
             <label>
-              Monthly rent (optional override)
-              <input type="number" name="rent" value={formData.rent} onChange={handleFieldChange} />
+              {formData.listingType === 'sale' ? 'Sale price (override)' : 'Monthly rent (override)'}
+              <input type="number" name={formData.listingType === 'sale' ? 'salePrice' : 'rent'} value={formData.listingType === 'sale' ? formData.salePrice : formData.rent} onChange={handleFieldChange} />
             </label>
             <label>
               Deposit
@@ -724,10 +748,6 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
 
           <div className="form-grid three-col">
             <label>
-              Legacy sale price
-              <input type="number" name="salePrice" value={formData.salePrice} onChange={handleFieldChange} />
-            </label>
-            <label>
               Other charges
               <input type="number" name="otherCharges" value={formData.otherCharges} onChange={handleFieldChange} />
             </label>
@@ -735,6 +755,14 @@ function PropertiesPage({ appData, setAppData, notify, defaultTypeFilter = 'All'
               Area
               <input type="number" name="area" value={formData.area} onChange={handleFieldChange} />
               {errors.area && <span className="field-error">{errors.area}</span>}
+            </label>
+            <label>
+              Listing Status
+              <select name="status" value={formData.status} onChange={handleFieldChange}>
+                {statusOptions.map((status) => (
+                  <option key={status} value={status}>{status}</option>
+                ))}
+              </select>
             </label>
           </div>
 

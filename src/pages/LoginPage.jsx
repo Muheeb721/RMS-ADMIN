@@ -3,8 +3,8 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import './LoginPage.css';
 
 function LoginPage({ onLogin }) {
-  const [email, setEmail] = useState('admin@rental.com');
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState('admin@rms.com');
+  const [password, setPassword] = useState('admin123');
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);

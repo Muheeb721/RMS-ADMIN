@@ -576,14 +576,13 @@ export const clearLoginCredentials = () => {
 export const clearAllAppStorage = () => {
   if (typeof window === 'undefined') return;
 
-  Object.values(STORAGE_KEYS).forEach((storageKey) => {
-    window.localStorage.removeItem(storageKey);
-  });
-
-  window.localStorage.removeItem(AUTH_KEY);
+  // Logout must not remove persisted business data or uploaded image references.
+  // Keep property/user records intact and clear only auth/session values.
+  clearAuthState();
   window.localStorage.removeItem('rms_admin_login_credentials');
-  window.localStorage.removeItem('rms_admin_token');
-  window.localStorage.removeItem('rms_token');
+  window.localStorage.removeItem('rms_auth_session');
+  window.localStorage.removeItem('rms_user_role');
+  window.localStorage.removeItem('rms_remembered_email');
   delete window.__RMS_AUTH_TOKEN;
   delete window.__rms_inmemory_token;
 };

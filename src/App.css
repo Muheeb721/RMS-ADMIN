@@ -566,8 +566,7 @@ td {
   margin-bottom: 8px;
 }
 
-.announcement-row p,
-.chatbot-row p {
+.announcement-row p {
   margin: 8px 0 0;
   line-height: 1.6;
   color: var(--muted);
@@ -582,16 +581,6 @@ td {
 
 .toggle-row input {
   width: auto;
-}
-
-.chatbot-row {
-  align-items: flex-start;
-}
-
-.chatbot-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
 }
 
 .settings-list {
@@ -742,8 +731,7 @@ td {
     align-items: flex-start;
   }
 
-  .inline-actions,
-  .chatbot-actions {
+  .inline-actions {
     width: 100%;
     flex-wrap: wrap;
   }

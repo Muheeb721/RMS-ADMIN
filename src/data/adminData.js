@@ -64,11 +64,6 @@ export const defaultState = {
     { id: 1, sender: 'Support Desk', subject: 'Repair request', status: 'Open', date: '2026-08-18' },
     { id: 2, sender: 'Tenant Portal', subject: 'Payment inquiry', status: 'Resolved', date: '2026-08-16' },
   ],
-  chatbot: [
-    { id: 1, question: 'How do I pay rent?', answer: 'You can pay online from the rent section in your dashboard.', language: 'English', enabled: true },
-    { id: 2, question: 'کیا کرایہ ادا کرنا ضروری ہے؟', answer: 'ہاں، کرایہ آپ کے ڈیٹھ بورڈ سے آن لائن ادا کیا جا سکتا ہے۔', language: 'Urdu', enabled: true },
-    { id: 3, question: 'How can I contact admin?', answer: 'Use the support page or the chat widget from your account dashboard.', language: 'English', enabled: false },
-  ],
   apiConfig: {
     baseUrl: (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, ''),
     token: import.meta.env.VITE_API_TOKEN || '',
@@ -100,7 +95,6 @@ export const navItems = [
   { label: 'Reviews', path: '/reviews', icon: '⭐' },
   { label: 'Messages', path: '/messages', icon: '✉' },
   { label: 'Reports', path: '/reports', icon: '📊' },
-  { label: 'Chatbot', path: '/chatbot', icon: '🤖' },
   { label: 'API Panel', path: '/api-panel', icon: '⚙' },
   { label: 'Admin Profile', path: '/profile', icon: '👤' },
   { label: 'Settings', path: '/settings', icon: '🛠' },

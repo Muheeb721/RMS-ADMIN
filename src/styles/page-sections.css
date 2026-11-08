@@ -260,16 +260,6 @@ th {
   flex-direction: row !important;
 }
 
-.chatbot-row {
-  align-items: flex-start;
-}
-
-.chatbot-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
 .review-item {
   padding: 14px 0;
   border-bottom: 1px solid var(--border);
